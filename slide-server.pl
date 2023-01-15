@@ -1,0 +1,105 @@
+#! /usr/bin/env perl
+use v5.36;
+use Mojolicious::Lite;
+use Mojo::WebSocket 'WS_PING';
+use Mojo::File 'path';
+use Mojo::DOM;
+use Log::Any '$log';
+use Log::Any::Adapter 'Daemontools';
+use Text::Markdown::Hoedown;
+
+$SIG{INT}= $SIG{TERM}= sub { exit 0; };
+
+our $presenter_key= $ENV{PRESENTER_KEY}
+	or die "Missing env PRESENTER_KEY";
+my ($markdown_source)= grep -f $_, '/app/slides.md', '/app/public/slides.md';
+my ($html_source)= grep -f $_, '/app/slides.html', '/app/public/slides.html';
+defined $markdown_source or defined $html_source
+	or die "Require one of slides.md or slides.html";
+
+sub markdown_to_html {
+	markdown(shift, extensions => (
+		HOEDOWN_EXT_TABLES | HOEDOWN_EXT_FENCED_CODE | HOEDOWN_EXT_AUTOLINK | HOEDOWN_EXT_STRIKETHROUGH
+		| HOEDOWN_EXT_UNDERLINE | HOEDOWN_EXT_QUOTE | HOEDOWN_EXT_SUPERSCRIPT | HOEDOWN_EXT_NO_INTRA_EMPHASIS
+		| HOEDOWN_EXT_DISABLE_INDENTED_CODE
+		)
+	);
+}
+
+# This function takes partial HTML (or full HTML) and upgrades it to full HTML
+# with the needed css and js for the slides.
+sub generate_slides_html {
+	my $custom= Mojo::DOM->new(shift);
+	my $result= Mojo::DOM->new(path('/app/slides_example.html')->slurp);
+	# Remove the example slides
+	$result->at('body')->replace('<body></body>');
+	# If custom defines a <head>, merge its elements into the example
+	$result->at('head')->append_content($custom->at('head')->child_nodes)
+		if $custom->at('head');
+	my $slides= $result->at('body');
+	# Find each custom element that is an immediate child of body, and add it to
+	# the current slide until the next <h1> <h2> or <div class="slide"> at which
+	# point, move to the next slide.
+	my $cur_slide;
+	for (($custom->at('body') || $custom)->@*) {
+		my $tag= lc($_->tag // '');
+		if ($tag eq 'h1' || $tag eq 'h2'
+			|| ($tag eq 'div' && $_->{class} =~ /\bslide\b/)
+		) {
+			$cur_slide= undef;
+		}
+		$cur_slide //= do {
+			$slides->append_content('<div class="slide"></div>');
+			$slides->children('div.slide')->last;
+		};
+		$cur_slide->append_content($_);
+	}
+	return "$result";
+}
+
+get '/' => sub ($c, @) {
+	my $html= $markdown_source? markdown_to_html(path($markdown_source)->slurp)
+		: path($html_source)->slurp;
+	$c->render(text => generate_slides_html($html));
+};
+
+my $cur_extern= '';
+my %viewers;
+my %published_state;
+
+sub update_published_state {
+	%published_state= ( %published_state, @_ );
+	$_->send({ json => { state => \%published_state } }) for values %viewers;
+}
+
+websocket '/slidelink.io' => sub {
+	my $c= shift;
+	my $id= $c->req->request_id;
+	$viewers{$id}= $c;
+	update_published_state(viewer_count => scalar keys %viewers);
+	
+	$log->infof("%s (%s) connected as %s", $id, $c->tx->remote_address, $c->stash('mode'));
+	
+	$c->on(json => sub {
+		my ($c, $msg)= @_;
+		$log->debugf("client %s %s msg=%s", $id, $c->tx->original_remote_address, $msg) if $log->is_debug;
+		if ($c->stash('driver')) {
+			if (defined $msg->{extern}) {
+			}
+			if (defined $msg->{slide_num}) {
+				update_published_state(slide_num => $msg->{slide_num}, step_num => $msg->{step_num});
+			}
+		}
+	});
+	$c->inactivity_timeout(3600);
+	#my $keepalive= Mojo::IOLoop->recurring(60 => sub { $viewers{$id}->send([1, 0, 0, 0, WS_PING, '']); });
+	#$c->stash(keepalive => $keepalive);
+	$c->on(finish => sub {
+		#Mojo::IOLoop->remove($keepalive);
+		delete $viewers{$id};
+		update_published_state(viewer_count => scalar keys %viewers);
+	});
+};
+
+push @ARGV, -l => 'http://*.80' unless grep $_ eq '-l', @ARGV;
+app->start;
