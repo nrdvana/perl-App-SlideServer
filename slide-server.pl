@@ -1,5 +1,6 @@
 #! /usr/bin/env perl
 use v5.36;
+use FindBin;
 use Mojolicious::Lite;
 use Mojo::WebSocket 'WS_PING';
 use Mojo::File 'path';
@@ -10,10 +11,12 @@ use Text::Markdown::Hoedown;
 
 $SIG{INT}= $SIG{TERM}= sub { exit 0; };
 
+our $APPDIR= $ENV{APPDIR} // $FindBin::RealBin;
+
 our $presenter_key= $ENV{PRESENTER_KEY}
 	or die "Missing env PRESENTER_KEY";
-my ($markdown_source)= grep -f $_, '/app/slides.md', '/app/public/slides.md';
-my ($html_source)= grep -f $_, '/app/slides.html', '/app/public/slides.html';
+my ($markdown_source)= grep -f $_, "$APPDIR/slides.md", "$APPDIR/public/slides.md";
+my ($html_source)= grep -f $_, "$APPDIR/slides.html", "$APPDIR/public/slides.html";
 defined $markdown_source or defined $html_source
 	or die "Require one of slides.md or slides.html";
 
@@ -30,13 +33,15 @@ sub markdown_to_html {
 # with the needed css and js for the slides.
 sub generate_slides_html {
 	my $custom= Mojo::DOM->new(shift);
-	my $result= Mojo::DOM->new(path('/app/slides_example.html')->slurp);
+	my $result= Mojo::DOM->new(path("$APPDIR/slides_example.html")->slurp);
 	# Remove the example slides
 	$result->at('body')->replace('<body></body>');
 	# If custom defines a <head>, merge its elements into the example
+	# TODO: prevent redundant header elements
 	$result->at('head')->append_content($custom->at('head')->child_nodes)
 		if $custom->at('head');
-	my $slides= $result->at('body');
+	$result->at('body')->append_content('<div class="slides"></div>');
+	my $slides= $result->at('div.slides');
 	# Find each custom element that is an immediate child of body, and add it to
 	# the current slide until the next <h1> <h2> or <div class="slide"> at which
 	# point, move to the next slide.
@@ -101,5 +106,5 @@ websocket '/slidelink.io' => sub {
 	});
 };
 
-push @ARGV, -l => 'http://*.80' unless grep $_ eq '-l', @ARGV;
+push @ARGV, qw( daemon -l http://*:2000 ) unless @ARGV;
 app->start;
