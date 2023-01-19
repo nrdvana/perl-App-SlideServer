@@ -6,7 +6,7 @@ use Mojo::WebSocket 'WS_PING';
 use Mojo::File 'path';
 use Mojo::DOM;
 use Log::Any '$log';
-use Log::Any::Adapter 'Daemontools';
+use Log::Any::Adapter 'Daemontools', -init => { argv => 1, env => 1 };
 use Text::Markdown::Hoedown;
 
 $SIG{INT}= $SIG{TERM}= sub { exit 0; };
@@ -81,9 +81,11 @@ websocket '/slidelink.io' => sub {
 	my $c= shift;
 	my $id= $c->req->request_id;
 	$viewers{$id}= $c;
+	my $key= $c->req->param('key');
+	$c->stash('driver', 1) if +($key||'') eq $presenter_key;
 	update_published_state(viewer_count => scalar keys %viewers);
 	
-	$log->infof("%s (%s) connected as %s", $id, $c->tx->remote_address, $c->stash('mode'));
+	$log->infof("%s (%s) connected as %s", $id, $c->tx->remote_address, $c->stash('driver')? 'driver' : 'obs');
 	
 	$c->on(json => sub {
 		my ($c, $msg)= @_;

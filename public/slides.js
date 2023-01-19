@@ -22,15 +22,109 @@
  * "go into effect" when that element is shown.  The external event ends when the
  * element is hidden or when the server says it ends.
  */
+function Slide(el) {
+	this.el= el;
+	this.el.dataset.slide= this;
+	var slide_jq= $(el);
+	// Look for .auto-step, and apply step numbers
+	var step_num= 1;
+	slide_jq.find('.auto-step').each(function(idx, e) {
+		// If it has a step number, and only one, then start the count of its children from that
+		var start_step= e.dataset.step;
+		if (start_step && start_step.match(/^[0-9]+$/))
+			step_num= parseInt(start_step);
+		$(e).children().each(function(){ this.dataset.step= [[step_num++]] });
+	});
+	// do a deep search to find any element with 'data-step' and give it the class of
+	// 'slide-step' for easier selecting later.
+	slide_jq.find('*').each(function(){
+		if (this.dataset.step)
+			$(this).addClass('slide-step');
+	});
+	// Parse each "data-step" specification and replace with an array of ranges
+	// Also calculate the step count
+	var max_step= 0;
+	this.steps= slide_jq.find('.slide-step');
+	this.steps.each(function() {
+		if (this.dataset.step && !this.dataset.stepRanges) {
+			var show_list= this.dataset.step;
+			show_list= (""+show_list).split(',');
+			for (var i= 0; i < show_list.length; i++) {
+				show_list[i]= show_list[i].split(/-/);
+				show_list[i][0]= parseInt(show_list[i][0]);
+				if (show_list[i][0] > max_step) max_step= show_list[i][0];
+				// If a step  has both a start frame and an end frame, then it is "temporary".
+				if (show_list[i].length > 1) {
+					show_list[i][1]= parseInt(show_list[i][1]);
+					if (show_list[i][1] > max_step) max_step= show_list[i][1];
+					$(this).addClass('temporary-step');
+				}
+			}
+			this.dataset.stepRanges= show_list;
+		}
+	});
+	this.notes= slide_jq.find('.notes').text();
+	this.max_step= max_step;
+	this.cur_step= 0;
+}
+Slide.prototype.scaleTo= function(viewport_w, viewport_h) {
+	var el_w= $(this.el).innerWidth();
+	var el_h= $(this.el).innerHeight();
+	var xscale= viewport_w / el_w;
+	var yscale= viewport_h / el_h;
+	// Example:
+	// 50x10 inside 100x60, xscale=2, yscale=6, pad h with 40, 20 top 20 bottom 
+	if (xscale < yscale) {
+		var ypad= parseInt((viewport_h - xscale * el_h)/2)+'px';
+		var transform= 'scale('+xscale+','+xscale+')';
+		$(this.el).css('margin', ypad+' 0').css('transform', transform);
+	} else {
+		var ypad= parseInt((viewport_h - el_h)/2)+'px';
+		var transform= 'scale('+yscale+','+yscale+')';
+		$(this.el).css('margin', ypad+' 0').css('transform', transform);
+	}
+}
+Slide.prototype.top= function() { return $(this.el).offset().top }
+Slide.prototype.show= function(show) { show? $(this.el).show() : $(this.el).hide(); return this }
+Slide.prototype.hide= function() { return this.show(false) }
+
+function _num_is_in_ranges(num, ranges) {
+	if (ranges)
+		for (var i= 0; i < ranges.length; i++)
+			if (num > ranges[i][0] && (ranges[i].length == 1 || num <= ranges[i][1]))
+				return true;
+	return false;
+}
+Slide.prototype.showStep= function(step_num, view_mode) {
+	if (step_num < 0) step_num= this.max_step + 1 + step_num;
+	if (step_num < 0) step_num= 0;
+	this.steps.each(function() {
+		var step= $(this);
+		// If a step is not visible, behavior depends on whether we are the presenter
+		// and whether the element is temporary.  Non-temporary elements need to remain
+		// in the document flow so that the layout of the rest doesn't jump around.
+		// But temporary have to be removed from the layout so that they don't occupy
+		// space.  Meanwhile the presenter gets to see all hidden elements.
+		if (_num_is_in_ranges(step_num, this.dataset.stepRanges))
+			step.css('visibility','visible').css('position','relative').css('opacity',1);
+		else {
+			if (view_mode == 'presenter')
+				step.css('visibility','visible').css('opacity', .3);
+			else
+				step.css('visibility','hidden');
+			if (step.hasClass('temporary-step'))
+				step.css('position','absolute');
+		}
+	});
+	this.cur_step= step_num;
+}
+
 window.slides= {
 	config: {},
-	//ws_uri: null, // URI for making websocket connection
-	//mode: null,   // 'presenter', 'main', or 'obs'
-
-	slide_elems: [],
-	step_elems: [],
+	slides: [],
 	cur_slide: null,
-	cur_extern: null,
+	driver: false,
+	follow: false,
 	
 	init: function(config) {
 		var self= this
@@ -38,16 +132,15 @@ window.slides= {
 			config= self.config
 		if (!config.websocket_url)
 			config.websocket_url= 'slidelink.io'
-		if (!config.mode)
-			config.mode= 'obs'
+		if (!config.mode) {
+			config.mode= window.location.hash.match('presenter')? 'presenter' : 'obs'
+		}
 		if (!('code_highlight' in config) && window.hljs)
 			config.code_highlight= function(el){ window.hljs.highlightElement(el) }
 		self.config= config
 		self._fixup_page()
 		self._build_ui()
-		this.cur_slide= 1;
-		for (var i= 1; i < this.slide_elems.length; i++)
-			$(this.slide_elems[i]).hide();
+		this._show_slide(1,1);
 		self.reconnect()
 	},
 	// Perform alterations to the HTML structure of the page to allow
@@ -63,8 +156,18 @@ window.slides= {
 			}
 		}
 		self.root.find('code').each(function() { self._fixup_code_block(this) })
-		this.slide_elems= self.root.find('.slide');
-		this.slide_elems.each(function() { self._resize_slide(this) })
+		// Wrap each slide with a Slide object, which initializes its steps
+		this.slides= [];
+		var slides_jq= self.root.find('.slide');
+		var viewport_w= $(window).width();
+		var viewport_h= $(window).height();
+		for (var i=0; i < slides_jq.length; i++) {
+			var slide= new Slide(slides_jq[i])
+			slide.idx= i
+			this.slides.push(slide)
+			slide.showStep(slide.max_step)
+			slide.scaleTo(viewport_w, viewport_h);
+		}
 	},
 	// Remove leading whitespace, and convert tabs to spaces, and remove
 	// the largest common indent of all lines.
@@ -88,25 +191,6 @@ window.slides= {
 		if (this.config.code_highlight)
 			this.config.code_highlight(code_el);
 	},
-	_resize_slide: function(el) {
-		var viewport_w= $(window).width();
-		var viewport_h= $(window).height();
-		var el_w= $(el).innerWidth();
-		var el_h= $(el).innerHeight();
-		var xscale= viewport_w / el_w;
-		var yscale= viewport_h / el_h;
-		// Example:
-		// 50x10 inside 100x60, xscale=2, yscale=6, pad h with 40, 20 top 20 bottom 
-		if (xscale < yscale) {
-			var ypad= parseInt((viewport_h - xscale * el_h)/2)+'px';
-			var transform= 'scale('+xscale+','+xscale+')';
-			$(el).css('margin', ypad+' 0').css('transform', transform);
-		} else {
-			var ypad= parseInt((viewport_h - el_h)/2)+'px';
-			var transform= 'scale('+yscale+','+yscale+')';
-			$(el).css('margin', ypad+' 0').css('transform', transform);
-		}
-	},
 	_build_ui: function() {
 		var self= this;
 		if (!self._button_dispatch)
@@ -120,6 +204,8 @@ window.slides= {
 		self.root.prepend(this._public_ui_html);
 		self.root.find('button').each(function(){ this.onclick= self._button_dispatch });
 		self.root.find('.status-actions button').hide();
+		$(document).on('keydown', function(e) { return self._handle_key(e.originalEvent); });
+		self.root.find('.slide').on('click', function(e) { return self._handle_click(e) });
 	},
 	_public_ui_html: (
 		'<div class="slides-sidebar">'+
@@ -144,26 +230,29 @@ window.slides= {
 		this.root.find('.slides-sidebar').toggleClass('open');
 		var root_top= this.root.offset().top;
 		if (this.root.find('.slides-sidebar').hasClass('open')) {
+			this.follow= false; // stop following while sidebar is open
+
 			// show all slides
 			this.root.find('.slide').show();
 			// and scroll to the one we were just on
 			if (this.cur_slide) {
-				console.log('leaving cur_slide='+this.cur_slide);
-				var slide= this.slide_elems[this.cur_slide-1];
-				document.documentElement.scrollTop= $(slide).offset().top;
+				var slide= this.slides[this.cur_slide-1];
+				document.documentElement.scrollTop= slide.top();
 			}
 		} else {
-			// hide all but the current slide
-			for (var i= 0; i < this.slide_elems.length; i++) {
-				console.log(''+i+' top='+$(this.slide_elems[i]).offset().top+' root_top='+root_top+' scroll='+document.documentElement.scrollTop);
-				if ($(this.slide_elems[i]).offset().top >= document.documentElement.scrollTop) {
-					this.cur_slide= i+1;
+			// Choose the first slide starting after the current scroll pos
+			var slide_num= 1;
+			for (var i= 0; i < this.slides.length; i++) {
+				if (this.slides[i].top() >= document.documentElement.scrollTop) {
+					slide_num= i+1;
 					break;
 				}
 			}
-			console.log('entering cur_slide='+this.cur_slide);
-			var slide= this.slide_elems[(this.cur_slide || 1)-1];
-			this.root.find('.slide').each(function(){ if (this != slide) $(this).hide() })
+			this.slide_num= null;
+			this.goToSlide(slide_num, null);
+			// Resume follow, if was following
+			if (this.config.mode == 'obs')
+				this.follow= true;
 		}
 	},
 	_presenter_ui_html: (
@@ -218,13 +307,28 @@ window.slides= {
 	_handle_connect: function(event) {
 		this.root.find('.reconnect-btn').hide()
 		this._set_conn_note('<p>Connected</p>', 1500)
+		if (this.config.mode == 'obs')
+			this.follow= true;
+		else
+			this.driver= true;
 	},
 	_handle_disconnect: function(event) {
 		this.root.find('.reconnect-btn').show()
 		this._set_conn_note('<p>Lost connection</p>')
 	},
 	_handle_ws_event: function(event) {
-		
+		if (event.state) {
+			this.sharedState= event.state;
+			if (event.state.slide_num && this.follow)
+				this.goToSlide(event.state.slide_num, event.state.step_num);
+		}
+	},
+	send_ws_message: function(obj) {
+		console.log('sending', obj);
+		if (this.ws)
+			this.ws.send( JSON.stringify(obj) );
+		else
+			console.log("Can't send: ", obj);
 	},
 	// Return true if the input event is destined for a DOM node that takes input
 	_event_is_for_input: function(e) {
@@ -233,14 +337,14 @@ window.slides= {
 			|| e.target.tagName == "TEXTAREA"
 			) || (e.originalEvent && this._event_is_for_input(e.originalEvent));
 	},
-	handle_key: function(e) {
+	_handle_key: function(e) {
 		// Ignore keys for input elements within the slides
 		if (this._event_is_for_input(e))
 			return true;
 		else if (e.keyCode == 39) // ArrowRight
-			this.change_slide(1);
+			this.goToSlide(this.cur_slide+1);
 		else if (e.keyCode == 37) // ArrowLeft
-			this.change_slide(-1);
+			this.goToSlide(this.cur_slide-1);
 		else if (e.keyCode == 40 || e.keyCode == 32) // ArrowDown, Space
 			this.step(1);
 		else if (e.keyCode == 38) // ArrowUp
@@ -249,23 +353,75 @@ window.slides= {
 			return true;
 		return false;
 	},
-	handle_click: function(e) {
-		self= this;
+	_handle_click: function(e) {
+		console.log('click', e);
 		// Ignore clicks for input elements within the slides
-		if (this._event_is_for_input(e)) return true;
-
-		var slide_num= $(e.currentTarget).data('slide_num');
-		if (slide_num) {
-			if (slide_num != self.cur_slide) {
-				self.show_slide(slide_num, 0)
-					&& self.relay_slide_position();
+		if (!this._event_is_for_input(e)) {
+			var slide= $(e.currentTarget).data('slide');
+			if (slide) {
+				if (this.root.find('.slides-sidebar').hasClass('open'))
+					this.togglemenu();
+				this.goToSlide(slide.idx+1, null);
+				return false;
 			}
-			else {
-				self.show_slide(null, null);
-			}
-			return false;
+		}
+		return true;
+	},
+	getSlide: function(slide_num) {
+		if (slide_num < 0)
+			slide_num= this.slides.length + 1 + slide_num;
+		if (slide_num < 1)
+			slide_num= 1;
+		else if (slide_num > this.slides.length)
+			slide_num= this.slides.length;
+		return this.slides[slide_num-1];
+	},
+	goToSlide: function(slide_num, step_num) {
+		var slide= this.getSlide(slide_num);
+		slide_num= slide.idx+1;
+		if (step_num == null)
+			step_num= slide.cur_step;
+		else {
+			if (step_num < 0)
+				step_num= slide.max_step + 1 + step_num;
+			if (step_num < 1)
+				step_num= 1;
+			else if (step_num > slide.max_step)
+				step_num= slide.max_step;
+		}
+		if (slide_num != this.cur_slide || step_num != slide.cur_step) {
+			this._show_slide(slide_num, step_num);
+			if (this.driver)
+				this.send_ws_message({ slide_num: slide_num, step_num: step_num });
 		}
 	},
+	step: function(ofs) {
+		let slide= this.getSlide(this.cur_slide);
+		if (ofs > 0) {
+			if (slide.cur_step + ofs <= slide.max_step)
+				this.goToSlide(this.cur_slide, slide.cur_step + ofs);
+			else
+				this.goToSlide(this.cur_slide+1, 1);
+		}
+		else if (ofs < 0) {
+			if (slide.cur_step + ofs > 0)
+				this.goToSlide(this.cur_slide, slide.cur_step + ofs);
+			else
+				this.goToSlide(this.cur_slide-1, -1);
+		}
+	},
+	_show_slide: function(slide_num, step_num) {
+		var slide= this.slides[slide_num-1];
+		for (var i= 0; i < this.slides.length; i++)
+			this.slides[i].show(i == slide_num-1);
+		this.cur_slide= slide_num;
+		if (step_num != null)
+			slide.showStep(step_num);
+		// Update notes for the presenter
+		if (this.mode == 'presenter')
+			this.root.find('.presenternotes pre').text(slide.notes || '');
+	},
+	
 	/*
 	init: function() {
 		var self= this;
@@ -348,47 +504,6 @@ window.slides= {
 			$('.chat-connect input').val('Main');
 			window.chat.connect("Main");
 		}
-	},
-	_init_slide: function(slide_dom_node, slide_num) {
-		$(slide_dom_node).addClass('slide').data('slide_num', slide_num);
-		// Look for .auto-step, and apply step numbers
-		var step_num= 1;
-		$(slide_dom_node).find('.auto-step').each(function(idx, e) {
-			// If it has a step number, and only one, then start the count of its children from that
-			var start_step= $(e).data('step');
-			if (start_step && start_step.match(/^[0-9]+$/))
-				step_num= parseInt(start_step);
-			$(e).children().each(function(){ $(this).data('step', [[step_num++]]) });
-		});
-		// do a deep search to find any element with 'data-step' and give it the class of
-		// 'slide-step' for easier selecting later.
-		$(slide_dom_node).find('*').each(function(){
-			if ($(this).data('step'))
-				$(this).addClass('slide-step');
-		});
-		// Parse each "data-step" specification and replace with an array of ranges
-		// Also calculate the step count
-		var max_step= 0;
-		$(slide_dom_node).find('.slide-step').each(function() {
-			var show_list= $(this).data('step');
-			if (!Array.isArray(show_list)) {
-				show_list= (""+show_list).split(',');
-				for (var i= 0; i < show_list.length; i++) {
-					show_list[i]= show_list[i].split(/-/);
-					show_list[i][0]= parseInt(show_list[i][0]);
-					// If a step  has both a start frame and an end frame, then it is "temporary".
-					if (show_list[i].length > 1) {
-						show_list[i][1]= parseInt(show_list[i][1]);
-						$(this).addClass('temporary-step');
-					}
-				}
-				$(this).data('step', show_list);
-			}
-			var last= show_list[show_list.length-1];
-			if (max_step < last[last.length-1])
-				max_step= last[last.length-1];
-		});
-		$(slide_dom_node).data('max_step', max_step);
 	},
 	handle_extern_event: function(e) {
 		//console.log('recv', e);
