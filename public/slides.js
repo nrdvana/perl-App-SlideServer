@@ -22,9 +22,10 @@
  * "go into effect" when that element is shown.  The external event ends when the
  * element is hidden or when the server says it ends.
  */
-function Slide(el) {
+function Slide(el, num) {
 	this.el= el;
-	this.el.dataset.slide= this;
+	this.el.dataset.slide= num;
+	this.num= num;
 	var slide_jq= $(el);
 	// Look for .auto-step, and apply step numbers
 	var step_num= 1;
@@ -91,7 +92,7 @@ Slide.prototype.hide= function() { return this.show(false) }
 function _num_is_in_ranges(num, ranges) {
 	if (ranges)
 		for (var i= 0; i < ranges.length; i++)
-			if (num > ranges[i][0] && (ranges[i].length == 1 || num <= ranges[i][1]))
+			if (num >= ranges[i][0] && (ranges[i].length == 1 || num <= ranges[i][1]))
 				return true;
 	return false;
 }
@@ -119,12 +120,21 @@ Slide.prototype.showStep= function(step_num, view_mode) {
 	this.cur_step= step_num;
 }
 
+function escape_html(unsafe) {
+  return (''+unsafe)
+    .replaceAll('&', "&amp;")
+    .replaceAll('<', "&lt;")
+    .replaceAll('>', "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 window.slides= {
 	config: {},
 	slides: [],
 	cur_slide: null,
-	driver: false,
-	follow: false,
+	roles: {},
+	state: {},
 	
 	init: function(config) {
 		var self= this
@@ -138,6 +148,21 @@ window.slides= {
 		if (!('code_highlight' in config) && window.hljs)
 			config.code_highlight= function(el){ window.hljs.highlightElement(el) }
 		self.config= config
+		// Generic button and checkbox handlers
+		this._button_dispatch= function(ev) {
+			try {
+				self[this.dataset.method].call(self, ev);
+			} catch (e) {
+				console.log('Calling slides.'+this.dataset.method+': '+e);
+			}
+		};
+		this._ckbox_dispatch= function(ev) {
+			try {
+				self[this.dataset.method].call(self, this.checked, ev);
+			} catch(e) {
+				console.log('Calling slides.'+this.dataset.method+' : '+e);
+			}
+		};
 		self._fixup_page()
 		self._build_ui()
 		this._show_slide(1,1);
@@ -162,8 +187,7 @@ window.slides= {
 		var viewport_w= $(window).width();
 		var viewport_h= $(window).height();
 		for (var i=0; i < slides_jq.length; i++) {
-			var slide= new Slide(slides_jq[i])
-			slide.idx= i
+			var slide= new Slide(slides_jq[i], i+1)
 			this.slides.push(slide)
 			slide.showStep(slide.max_step)
 			slide.scaleTo(viewport_w, viewport_h);
@@ -193,16 +217,9 @@ window.slides= {
 	},
 	_build_ui: function() {
 		var self= this;
-		if (!self._button_dispatch)
-			self._button_dispatch= function(ev) {
-				try {
-					self[this.dataset.method].apply(self, ev);
-				} catch (e) {
-					console.log('Calling slides.'+this.dataset.method+': '+e);
-				}
-			};
 		self.root.prepend(this._public_ui_html);
 		self.root.find('button').each(function(){ this.onclick= self._button_dispatch });
+		self.root.find('input[type="checkbox"]').each(function(){ this.oninput= self._ckbox_dispatch });
 		self.root.find('.status-actions button').hide();
 		$(document).on('keydown', function(e) { return self._handle_key(e.originalEvent); });
 		self.root.find('.slide').on('click', function(e) { return self._handle_click(e) });
@@ -217,21 +234,48 @@ window.slides= {
 		'  </div>'+
 		'  <div class="ui"><div class="ui-inner">'+
 		'    <h5>Status</h5>'+
-		'    <div class="status"></div>'+
+		'    <ul class="status"></ul>'+
 		'    <div class="status-actions">'+
 		'      <button class="reconnect-btn" type="button" data-method="reconnect">Reconnect</button>'+
-		'      <button class="follow-btn" type="button" data-method="follow">Follow</button>'+
-		'      <button class="wander-btn" type="button" data-method="stopfollow">Stop Following</button>'+
+		'      <label class="cb follow"><input type="checkbox" name="follow" checked data-method="enableFollow"> Follow</label>'+
+		'      <label class="cb lead"><input type="checkbox" name="lead" data-method="enableLead"> Lead</label>'+
+		'      <label class="cb navigate"><input type="checkbox" name="navigate" data-method="enableNavigate"> Show Nav Buttons</label>'+
+		'      <label class="cb notes"><input type="checkbox" name="notes" data-method="enableNotes"> Show Notes</label>'+
 		'    </div>'+
 		'  </div></div>'+
+		'</div>'
+	),
+	_build_nav_ui: function() {
+		var self= this;
+		if (!self.nav_ui) {
+			self.root.prepend(this._nav_ui_html);
+			self.nav_ui= self.root.find('.navbuttons');
+			self.nav_ui.find('button').each(function(){ this.onclick= self._button_dispatch });
+		}
+	},
+	_nav_ui_html: (
+		'<div class="navbuttons">'+
+		'  <button class="prev" type="button" data-method="navPrev">Prev</button>'+
+		'  <button class="step" type="button" data-method="navStep">Step</button>'+
+		'  <button class="next" type="button" data-method="navNext">Next</button>'+
+		'</div>'
+	),
+	_build_presenternotes_ui: function() {
+		var self= this;
+		if (!self.presenternotes_ui) {
+			self.root.prepend(this._presenternotes_ui_html);
+			self.presenternotes_ui= self.root.find('.presenternotes');
+		}
+	},
+	_presenternotes_ui_html: (
+		'<div class="presenternotes">'+
+		'  <pre></pre>'+
 		'</div>'
 	),
 	togglemenu: function() {
 		this.root.find('.slides-sidebar').toggleClass('open');
 		var root_top= this.root.offset().top;
 		if (this.root.find('.slides-sidebar').hasClass('open')) {
-			this.follow= false; // stop following while sidebar is open
-
 			// show all slides
 			this.root.find('.slide').show();
 			// and scroll to the one we were just on
@@ -250,23 +294,8 @@ window.slides= {
 			}
 			this.slide_num= null;
 			this.goToSlide(slide_num, null);
-			// Resume follow, if was following
-			if (this.config.mode == 'obs')
-				this.follow= true;
 		}
 	},
-	_presenter_ui_html: (
-		'<div class="slides-control">'+
-		'  <div class="navbuttons">'+
-		'    <button type="button" data-method="nav_prev">Prev</button>'+
-		'    <button type="button" data-method="nav_step">Step</button>'+
-		'    <button type="button" data-method="nav_next">Next</button>'+
-		'  </div>'+
-		'  <div class="presenternotes">'+
-		'    <pre></pre>'+
-		'  </div>'+
-		'</div>'
-	),
 	reconnect: function() {
 		var self= this;
 		var url= this.config.websocket_url;
@@ -279,14 +308,64 @@ window.slides= {
 			url= (loc.protocol == 'https:'? 'wss://' : 'ws://') + window.location.host + url;
 		}
 		var key= '';
-		if (this.config.mode != 'obs')
+		var mode= this.config.mode;
+		if (mode != 'obs')
 			key= window.prompt('Key');
 		// Connect WebSocket to local event server
-		this.ws= new WebSocket(url+'?mode='+this.config.mode+'&key='+encodeURIComponent(key));
-		this.ws.onmessage= function(event) { self._handle_ws_event(JSON.parse(event.data)) }
-		this.ws.onopen= function(event) { self._handle_connect(event) }
-		this.ws.onclose= function(event) { self._handle_disconnect(event) }
 		this._set_conn_note('<p>Connecting...</p>')
+		this.ws= new WebSocket(url+'?mode='+mode+'&key='+encodeURIComponent(key));
+		this.ws.onmessage= function(event) { self._handle_ws_event(JSON.parse(event.data)) }
+		this.ws.onopen= function(event) { self._handle_connect(event, url, mode) }
+		this.ws.onclose= function(event) { self._handle_disconnect(event) }
+	},
+	enableLead: function(enable, ev) {
+		console.log('roles', this.roles);
+		if (enable) {
+			if (this.roles.lead) {
+				this.leading= true;
+				this.enableFollow(false);
+			}
+		} else {
+			this.leading= false;
+		}
+		var ckbox= this.root.find('.status-actions .lead input');
+		if (!!ckbox.prop('checked') != !!enable) ckbox.prop('checked', enable);
+		this._update_status();
+	},
+	enableFollow: function(enable, ev) {
+		if (enable) {
+			this.following= true;
+			this.enableLead(false);
+			this.goToLeaderSlide();
+		} else {
+			this.following= false;
+		}
+		var ckbox= this.root.find('.status-actions .follow input');
+		console.log(ckbox, this.root);
+		if (!!ckbox.prop('checked') != !!enable) ckbox.prop('checked', enable);
+	},
+	enableNavigate: function(enable, ev) {
+		if (enable) {
+			this._build_nav_ui();
+			this.nav_ui.show();
+		} else {
+			if (this.nav_ui)
+				this.nav_ui.hide();
+		}
+		var ckbox= this.root.find('.status-actions .navigate input');
+		if (!!ckbox.prop('checked') != !!enable) ckbox.prop('checked', enable);
+	},
+	enableNotes: function(enable, ev) {
+		if (enable) {
+			this._build_presenternotes_ui();
+			this.presenternotes_ui.show();
+		} else {
+			if (this._presenternotes_ui)
+				this.presenternotes_ui.hide();
+		}
+		// re-render current slide
+		this.showNotes= !!enable;
+		this._show_slide(this.cur_slide, this.getSlide(this.cur_slide).cur_step);
 	},
 	_set_conn_note: function(content, duration) {
 		var self= this;
@@ -303,28 +382,62 @@ window.slides= {
 				if (self._conn_note == next) this._conn_note= null
 				next.fadeOut(500, function(){ next.remove() });
 			}, duration);
+		this._update_status();
 	},
-	_handle_connect: function(event) {
+	_update_status: function() {
+		var status= this.root.find('.status');
+		status.empty();
+		if (this.ws) {
+			var server= ''+this.ws.url;
+			server= server.replace(/^wss?:\/\/([^:\/]+).*/, '$1');
+			if (this.ws.readyState == 0)
+				status.append('<li class="connecting">Connecting to <span class="host">'+escape_html(server)+'</span></li>');
+			else if (this.ws.readyState == 1)
+				status.append('<li class="connected">Connected to <span class="host">'+escape_html(server)+'</span></li>');
+			else
+				status.append('<li class="disconnected">Not connected</li>');
+		}
+		if (this.following)
+			status.append('<li class="follow">Following presenter</li>');
+		else if (this.leading)
+			status.append('<li class="broadcast">Broadcasting</li>');
+		if (this.cur_slide && this.slides && this.slides.length)
+			status.append('<li class="pos">Slide <b>'+this.cur_slide+'</b> of <b>'+this.slides.length+'</b></li>');
+	},
+	_handle_connect: function(event, url, mode) {
 		this.root.find('.reconnect-btn').hide()
 		this._set_conn_note('<p>Connected</p>', 1500)
 		if (this.config.mode == 'obs')
-			this.follow= true;
-		else
-			this.driver= true;
+			this.enableFollow(true);
 	},
 	_handle_disconnect: function(event) {
 		this.root.find('.reconnect-btn').show()
 		this._set_conn_note('<p>Lost connection</p>')
+		delete this.ws;
 	},
 	_handle_ws_event: function(event) {
+		console.log('ws event: ', event);
 		if (event.state) {
 			this.sharedState= event.state;
-			if (event.state.slide_num && this.follow)
-				this.goToSlide(event.state.slide_num, event.state.step_num);
+			if (this.following)
+				this.goToLeaderSlide();
+		}
+		if (event.roles) {
+			this.roles= {};
+			for (var i=0; i < event.roles.length; i++)
+				this.roles[event.roles[i]]= 1;
+			if (this.roles.lead) {
+				this.enableFollow(false);
+				this.root.find('.status-actions .follow').show();
+				this.root.find('.status-actions .lead').show();
+				this.root.find('.status-actions .notes').show();
+			}
+			if (this.roles.navigate || this.roles.lead) {
+				this.root.find('.status-actions .nav-ui').show();
+			}
 		}
 	},
 	send_ws_message: function(obj) {
-		console.log('sending', obj);
 		if (this.ws)
 			this.ws.send( JSON.stringify(obj) );
 		else
@@ -333,7 +446,7 @@ window.slides= {
 	// Return true if the input event is destined for a DOM node that takes input
 	_event_is_for_input: function(e) {
 		return (e.target.tagName == "INPUT"
-			|| e.target.tagName == "BUTTON"
+			|| (e.target.tagName == "BUTTON" && e.type == 'click')
 			|| e.target.tagName == "TEXTAREA"
 			) || (e.originalEvent && this._event_is_for_input(e.originalEvent));
 	},
@@ -342,9 +455,9 @@ window.slides= {
 		if (this._event_is_for_input(e))
 			return true;
 		else if (e.keyCode == 39) // ArrowRight
-			this.goToSlide(this.cur_slide+1);
+			this.navNext();
 		else if (e.keyCode == 37) // ArrowLeft
-			this.goToSlide(this.cur_slide-1);
+			this.navPrev();
 		else if (e.keyCode == 40 || e.keyCode == 32) // ArrowDown, Space
 			this.step(1);
 		else if (e.keyCode == 38) // ArrowUp
@@ -357,17 +470,18 @@ window.slides= {
 		console.log('click', e);
 		// Ignore clicks for input elements within the slides
 		if (!this._event_is_for_input(e)) {
-			var slide= $(e.currentTarget).data('slide');
+			var slide= e.currentTarget.dataset.slide;
 			if (slide) {
 				if (this.root.find('.slides-sidebar').hasClass('open'))
 					this.togglemenu();
-				this.goToSlide(slide.idx+1, null);
+				this.goToSlide(slide, null);
 				return false;
 			}
 		}
 		return true;
 	},
 	getSlide: function(slide_num) {
+		console.log('getSlide', slide_num);
 		if (slide_num < 0)
 			slide_num= this.slides.length + 1 + slide_num;
 		if (slide_num < 1)
@@ -378,7 +492,7 @@ window.slides= {
 	},
 	goToSlide: function(slide_num, step_num) {
 		var slide= this.getSlide(slide_num);
-		slide_num= slide.idx+1;
+		slide_num= slide.num;
 		if (step_num == null)
 			step_num= slide.cur_step;
 		else {
@@ -391,17 +505,30 @@ window.slides= {
 		}
 		if (slide_num != this.cur_slide || step_num != slide.cur_step) {
 			this._show_slide(slide_num, step_num);
-			if (this.driver)
+			this._update_status();
+			if (this.leading)
 				this.send_ws_message({ slide_num: slide_num, step_num: step_num });
 		}
+	},
+	navPrev: function() {
+		this.enableFollow(false);
+		this.goToSlide(this.cur_slide-1);
+	},
+	navNext: function() {
+		this.enableFollow(false);
+		this.goToSlide(this.cur_slide+1);
+	},
+	navStep: function() {
+		this.enableFollow(false);
+		this.step(1);
 	},
 	step: function(ofs) {
 		let slide= this.getSlide(this.cur_slide);
 		if (ofs > 0) {
 			if (slide.cur_step + ofs <= slide.max_step)
-				this.goToSlide(this.cur_slide, slide.cur_step + ofs);
+				this.goToSlide(slide.num, slide.cur_step + ofs);
 			else
-				this.goToSlide(this.cur_slide+1, 1);
+				this.goToSlide(slide.num+1, 1);
 		}
 		else if (ofs < 0) {
 			if (slide.cur_step + ofs > 0)
@@ -410,267 +537,19 @@ window.slides= {
 				this.goToSlide(this.cur_slide-1, -1);
 		}
 	},
+	goToLeaderSlide: function() {
+		if (this.sharedState.slide_num)
+			this.goToSlide(this.sharedState.slide_num, this.sharedState.step_num);
+	},
 	_show_slide: function(slide_num, step_num) {
 		var slide= this.slides[slide_num-1];
 		for (var i= 0; i < this.slides.length; i++)
 			this.slides[i].show(i == slide_num-1);
 		this.cur_slide= slide_num;
 		if (step_num != null)
-			slide.showStep(step_num);
+			slide.showStep(step_num, this.showNotes? 'presenter' : null);
 		// Update notes for the presenter
-		if (this.mode == 'presenter')
+		if (this.showNotes)
 			this.root.find('.presenternotes pre').text(slide.notes || '');
-	},
-	
-	/*
-	init: function() {
-		var self= this;
-		if (!this.mode) {
-			// 'presenter' mode drives the slide show, and shows notes
-			// 'main' mode shows slides in their official published form while also allowing control
-			// 'obs' mode is a read-only observer mode intended for the audience
-			this.mode= window.location.pathname.match(/^\/presenter/)? 'presenter'
-				: window.location.pathname.match(/^\/main/)? 'main'
-				: 'obs';
-		}
-		if (this.mode == 'main')
-			$('body').addClass('high-contrast');
-		
-		// make a list of DOM nodes for all immediate children of <ol class="slides">
-		self.slide_elems= $('ol.slides > li');
-		// give each of them a sequence number for quick reference
-		self.slide_elems.each(function(idx, e) { self._init_slide(this, idx+1) });
-		// register key and click handlers
-		$(document).on('keydown', function(e) { return self.handle_key(e.originalEvent); });
-		self.slide_elems.on('click', function(e) { self.handle_click(e) });
-		// Inject "reconnect" button and register click handler
-		$('body').prepend(
-			'<div id="websocket-reconnect">'+
-			'	<button>Reconnect</button>'+
-			'</div>'+
-			'<div id="slideshow-join">'+
-			'    Follow along at<br>'+
-			'    <span class="slideshow-address"></span>'+
-			'</div>'
-		);
-		$('#websocket-reconnect button').on('click', function(e) { self.reconnect(e) });
-		$('#slideshow-join').hide();
-		// If opened in "control UI mode", inject buttons of UI
-		if (this.mode == 'presenter') {
-			$('body').prepend(
-				'<div id="navbuttons">'+
-				'	<button id="nav_prev">Prev</button>'+
-				'	<button id="nav_step">Step</button>'+
-				'	<button id="nav_next">Next</button>'+
-				'</div>'+
-				'<div id="presenternotes">'+
-				'	<pre></pre>'+
-				'</div>'
-			);
-			$('#nav_prev').on('click', function() { self.change_slide(-1); });
-			$('#nav_next').on('click', function() { self.change_slide(1); });
-			$('#nav_step').on('click', function() { self.step(1); });
-		}
-		// Initialize slides in not-slideshow mode
-		this.show_slide(null);
-		// For each <CODE> tag, remove leading whitespace, and convert tabs to spaces
-		$('code').each(function() {
-			var text= $(this).text();
-			text= text.replace(/\t/g, '   '); // tabs to spaces
-			text= text.replace(/^\s*\n/g, ''); // remove leading blank line
-			text= text.replace(/\n\s*$/g, ''); // remove blank trailing line
-			// find the shortest match of whitespace at the start of any line
-			var lead_ws_re= new RegExp('^( *)','mg');
-			var indent= null;
-			while ((matches= lead_ws_re.exec(text)) !== null)
-				if (indent === null || matches[1].length < indent) {
-					indent= matches[1].length;
-					if (indent == 0) break;
-				}
-			if (indent > 0)
-				text= text.replace(new RegExp('^'+(' '.repeat(indent)), 'mg'), '');
-			$(this).text(text);
-		});
-		// 'presenter' and 'main' need to enter a password, but observers should just auto-connect
-		if (this.mode == 'obs') {
-			this.reconnect();
-			self.show_slide(2, 0);
-		}
-		if (this.mode == 'presenter') {
-			$('.chat-connect input').val('Mike');
-			window.chat.connect("nerdvana");
-		}
-		if (this.mode == 'main') {
-			$('.chat-connect input').val('Main');
-			window.chat.connect("Main");
-		}
-	},
-	handle_extern_event: function(e) {
-		//console.log('recv', e);
-		// If extern visual has closed, advance to the next slide or step
-		if (e['extern_ended'] && e.extern_ended == this.cur_extern)
-			this.step_anim(1);
-		// If given a slide position, and we are in slide-view mode, go to this one
-		if ('slide_num' in e && this.cur_slide)
-			this.show_slide(e['slide_num'] || 0, e['step_num'] || 0);
-		if ('slide_host' in e) {
-			$('.slideshow-address').text(e.slide_host);
-			$('#slideshow-join').show();
-		}
-	},
-	emit_extern_event: function(obj) {
-		//console.log('send',obj);
-		if (this.ws)
-			this.ws.send( JSON.stringify(obj) );
-		else
-			console.log("Can't send: ", obj);
-	},
-	change_slide: function(ofs) {
-		var next_idx= (this.cur_slide? this.cur_slide : 0) + ofs;
-		if (next_idx < 0) next_idx += this.slide_elems.length + 1;
-		if (next_idx > this.slide_elems.length) next_idx -= this.slide_elems.length + 1;
-		this.show_slide(next_idx, ofs > 0? 1 : -1)
-			&& self.relay_slide_position();
-	},
-	step: function(ofs) {
-		if (!this.cur_slide) {
-			this.show_slide(1,0);
-		}
-		else {
-			var next_slide= this.cur_slide;
-			var next_step= this.cur_step + ofs;
-			while (next_step < 0) {
-				if (! --next_slide) {
-					if (next_step == -1) { next_step= 0; break; }
-					else { next_slide= this.slide_elems.length-1; next_step += 2; }
-				}
-				next_step += $(this.slide_elems[next_slide-1]).data('max_step')+1;
-			}
-			while (next_step > $(this.slide_elems[next_slide-1]).data('max_step')) {
-				next_step -= $(this.slide_elems[next_slide-1]).data('max_step')+1;
-				if (++next_slide > this.slide_elems.length) {
-					if (next_step == 0) { next_slide= 0; break; }
-					else { next_slide= 1; }
-				}
-			}
-			this.show_slide(next_slide, next_step);
-		}
-		this.relay_slide_position();
-	},
-	client_rect: function(elem) {
-		var r= elem.getBoundingClientRect();
-		//console.log(elem, r);
-		return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
-	},
-	show_slide: function(slide_num, step_num) {
-		//console.log('show_slide(',slide_num,',',step_num,')');
-		var self= this;
-		if (!slide_num) {
-			// return to scrolling-page mode
-			$(document.documentElement).css('overflow','auto');
-			// Show all steps for each slide
-			this.slide_elems.find('.slide-step')
-				.css('visibility','visible')
-				.css('position','relative')
-				.css('opacity',1);
-			// Show all slides
-			this.slide_elems.show()
-				.css('height','auto')
-				.css('transform','none')
-				.css('border','1px solid grey');
-			if (this.cur_slide) {
-				var slide= this.slide_elems[this.cur_slide-1];
-				document.documentElement.scrollTop= $(slide).offset().top;
-				this.cur_slide= null;
-			}
-		}
-		else {
-			var elem= this.slide_elems[ slide_num > 0 ? slide_num-1 : this.slide_elems.length + slide_num ];
-			var changed= false;
-			if (!this.cur_slide || this.cur_slide != slide_num) {
-				// Make sure page is in single-slide mode
-				$(document.documentElement).css('overflow','hidden');
-				$(elem).show(); // show element, to be able to get its dimensions
-				var el_w= $(elem).innerWidth();
-				var el_h= $(elem).innerHeight();
-				// Hide all slides
-				this.slide_elems.hide();
-				// Then show this one slide, scaled to the smaller dimension of the viewport
-				var viewport_w= $(window).width();
-				var viewport_h= $(window).height();
-				var xscale= viewport_w / el_w;
-				var yscale= viewport_h / el_h;
-				var scale= Math.min(xscale, yscale);
-				var transform= 'translate(0,'+(-el_h/2+viewport_h/2)+'px) scale('+scale+','+scale+')';
-				console.log('transform',transform);
-				$(elem).show()
-					.css('border','none')
-					.css('transform',transform);
-				// mark this one as the current slide
-				this.cur_slide= slide_num;
-				this.cur_step= null;
-				changed= true;
-			}
-			var max_step= $(elem).data('max_step');
-			if (step_num < 0) step_num= max_step + 1 + step_num;
-			if (step_num < 0) step_num= 0;
-			if (changed || step_num != this.cur_step) {
-				$(elem).find('.slide-step').each(function() {
-					// If a step is not visible, behavior depends on whether we are the presenter
-					// and whether the element is temporary.  Non-temporary elements need to remain
-					// in the document flow so that the layout of the rest doesn't jump around.
-					// But temporary have to be removed from the layout so that they don't occupy
-					// space.  Meanwhile the presenter gets to see all hidden elements.
-					if (self._is_shown_on_step(this, step_num))
-						$(this).css('visibility','visible').css('position','relative').css('opacity',1);
-					else {
-						if (self.mode == 'presenter')
-							$(this).css('visibility','visible').css('opacity', .3);
-						else
-							$(this).css('visibility','hidden');
-						if ($(this).hasClass('temporary-step'))
-							$(this).css('position','absolute');
-					}
-				});
-				this.cur_step= step_num;
-				changed= true;
-			}
-			var figure= $(elem).find('figure');
-			this.cur_figure= figure.length? figure[0] : null;
-			var prev_extern= this.cur_extern;
-			this.cur_extern= figure.length? figure.data('extern') : null;
-			this.cur_notes= $(elem).find('.notes').text();
-			if (this.mode == 'presenter') {
-				$('#presenternotes pre').text(this.cur_notes);
-			}
-			else if (changed && (prev_extern || this.cur_extern)) {
-				this.emit_extern_event({
-					extern: this.mode == 'main'? (this.cur_extern? this.cur_extern : '-') : null,
-					elem_rect:
-						this.cur_figure? this.client_rect(this.cur_figure)
-						: this.slide_num? this.client_rect(this.slide_elems[this.slide_num-1])
-						: null
-				});
-			}
-		}
-		return changed;
-	},
-	_is_shown_on_step: function(elem, step_num) {
-		var show_on= $(elem).data('step');
-		var shown= false;
-		if (show_on)
-			$.each(show_on, function(i, range) {
-				if (step_num >= range[0] && (range.length==1 || step_num <= range[1]))
-					shown= true;
-			});
-		return shown;
-	},
-	relay_slide_position: function() {
-		if (this.cur_slide)
-			this.emit_extern_event({
-				slide_num: this.cur_slide,
-				step_num: this.cur_step,
-			});
 	}
-	*/
 };

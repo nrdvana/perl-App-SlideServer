@@ -46,18 +46,24 @@ sub generate_slides_html {
 	# the current slide until the next <h1> <h2> or <div class="slide"> at which
 	# point, move to the next slide.
 	my $cur_slide;
-	for (($custom->at('body') || $custom)->@*) {
+	for (($custom->at('div.slides') || $custom->at('body') || $custom)->@*) {
 		my $tag= lc($_->tag // '');
-		if ($tag eq 'h1' || $tag eq 'h2'
-			|| ($tag eq 'div' && $_->{class} =~ /\bslide\b/)
-		) {
+		# is it a whole pre-defined slide
+		if ($tag eq 'div' && $_->{class} =~ /\bslide\b/) {
 			$cur_slide= undef;
+			$slides->append_content($_);
 		}
-		$cur_slide //= do {
-			$slides->append_content('<div class="slide"></div>');
-			$slides->children('div.slide')->last;
-		};
-		$cur_slide->append_content($_);
+		else {
+			# start a new slide every time H1 or H2 seen
+			$cur_slide= undef if $tag eq 'h1' || $tag eq 'h2';
+			# Add "auto-step" to any <UL> tags
+			$_->{class}= "auto-step" if ($tag eq 'ul' || $tag eq 'ol') && !$_->{class};
+			$cur_slide //= do {
+				$slides->append_content('<div class="slide"></div>');
+				$slides->children('div.slide')->last;
+			};
+			$cur_slide->append_content($_);
+		}
 	}
 	return "$result";
 }
@@ -81,16 +87,23 @@ websocket '/slidelink.io' => sub {
 	my $c= shift;
 	my $id= $c->req->request_id;
 	$viewers{$id}= $c;
+	my $mode= $c->req->param('mode');
 	my $key= $c->req->param('key');
-	$c->stash('driver', 1) if +($key||'') eq $presenter_key;
-	update_published_state(viewer_count => scalar keys %viewers);
-	
-	$log->infof("%s (%s) connected as %s", $id, $c->tx->remote_address, $c->stash('driver')? 'driver' : 'obs');
+	my %roles= (follow => 1);
+	if ($mode == 'presenter') {
+		if (($key||'') eq $presenter_key) {
+			$roles{lead}= 1;
+			update_published_state(viewer_count => scalar keys %viewers);
+		}
+	}
+	$c->stash('roles', join ',', keys %roles);
+	$log->infof("%s (%s) connected as %s", $id, $c->tx->remote_address, $c->stash('roles'));
+	$c->send({ json => { roles => [ keys %roles ] } });
 	
 	$c->on(json => sub {
 		my ($c, $msg)= @_;
 		$log->debugf("client %s %s msg=%s", $id, $c->tx->original_remote_address, $msg) if $log->is_debug;
-		if ($c->stash('driver')) {
+		if ($c->stash('roles') =~ /\blead\b/) {
 			if (defined $msg->{extern}) {
 			}
 			if (defined $msg->{slide_num}) {
