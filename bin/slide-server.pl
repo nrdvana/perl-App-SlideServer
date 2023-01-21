@@ -5,6 +5,10 @@ use Cwd;
 use Mojo::File 'path';
 use Log::Any::Adapter 'Daemontools', -init => { argv => 1, env => 1 };
 
+#PODNAME: slide-server
+#ABSTRACT: Run a HTTP server that serves the slides and websocket
+#VERSION:
+
 # in case running in Docker, need signal handlers installed
 $SIG{INT}= $SIG{TERM}= sub { exit 0; };
 

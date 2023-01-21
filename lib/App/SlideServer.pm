@@ -7,6 +7,9 @@ use Mojo::DOM;
 use Log::Any '$log';
 use Text::Markdown::Hoedown;
 
+#ABSTRACT: Mojo web server that serves slides and websocket
+#VERSION:
+
 # Files that ship with the distribution
 has share_dir => sub {
 	if (-f path(__FILE__)->sibling('..','..','share','public','slides.js')) {
