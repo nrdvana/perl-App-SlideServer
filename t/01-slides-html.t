@@ -1,6 +1,6 @@
 #!perl
 use v5.36;
-use Test2::V0;
+use Test::More;
 use Test::Mojo;
 
 my $t= Test::Mojo->new('App::SlideServer');
