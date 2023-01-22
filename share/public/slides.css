@@ -101,6 +101,7 @@
 	gap: 4px;
 	margin: 4px 0;
 }
+.slides .status-actions > * { display: none; }
 .slides .status-actions > label { font-size: 90%; }
 
 .navbuttons {

@@ -433,7 +433,7 @@ window.slides= {
 				this.root.find('.status-actions .notes').show();
 			}
 			if (this.roles.navigate || this.roles.lead) {
-				this.root.find('.status-actions .nav-ui').show();
+				this.root.find('.status-actions .navigate').show();
 			}
 		}
 	},
