@@ -4,14 +4,10 @@ RUN apk add --no-cache perl gcc make musl-dev
 
 RUN apk add --no-cache perl-app-cpanminus perl-mojolicious perl-log-any perl-dev perl-module-build perl-file-pushd
 
-RUN cpanm Log::Any::Adapter::Daemontools Text::Markdown::Hoedown \
- && rm -rf ~/.cpanm
-
-COPY slide-server.pl /app/
-COPY slides_example.html /app/
-COPY public /app/public/
+COPY App-SlideServer-0.001.tar.gz /
+RUN cpanm /App-SlideServer-0.001.tar.gz
 
 EXPOSE 80
 
 ENTRYPOINT ["/usr/bin/env"]
-CMD ["perl","/app/slide-server.pl","daemon","-m","production","-l","http://*:80"]
+CMD ["slide-server","daemon","-m","production","-l","http://*:80"]
