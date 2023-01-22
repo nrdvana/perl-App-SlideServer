@@ -134,7 +134,7 @@ window.slides= {
 	slides: [],
 	cur_slide: null,
 	roles: {},
-	state: {},
+	sharedState: {},
 	
 	init: function(config) {
 		var self= this
@@ -184,11 +184,18 @@ window.slides= {
 		// Wrap each slide with a Slide object, which initializes its steps
 		this.slides= [];
 		var slides_jq= self.root.find('.slide');
-		var viewport_w= $(window).width();
-		var viewport_h= $(window).height();
 		for (var i=0; i < slides_jq.length; i++) {
 			var slide= new Slide(slides_jq[i], i+1)
 			this.slides.push(slide)
+		}
+		this.resizeSlides();
+		window.addEventListener('resize', function(event) { self.resizeSlides() }, true);
+	},
+	resizeSlides: function() {
+		var viewport_w= $(window).width();
+		var viewport_h= $(window).height();
+		for (var i= 0; i < this.slides.length; i++) {
+			var slide= this.slides[i];
 			slide.showStep(slide.max_step)
 			slide.scaleTo(viewport_w, viewport_h);
 		}
@@ -272,28 +279,37 @@ window.slides= {
 		'  <pre></pre>'+
 		'</div>'
 	),
-	togglemenu: function() {
+	togglemenu: function(next_slide) {
 		this.root.find('.slides-sidebar').toggleClass('open');
 		var root_top= this.root.offset().top;
 		if (this.root.find('.slides-sidebar').hasClass('open')) {
-			// show all slides
-			this.root.find('.slide').show();
-			// and scroll to the one we were just on
-			if (this.cur_slide) {
-				var slide= this.slides[this.cur_slide-1];
-				document.documentElement.scrollTop= slide.top();
-			}
-		} else {
-			// Choose the first slide starting after the current scroll pos
-			var slide_num= 1;
-			for (var i= 0; i < this.slides.length; i++) {
-				if (this.slides[i].top() >= document.documentElement.scrollTop) {
-					slide_num= i+1;
-					break;
+			// if allowed to navigate, show all slides
+			if (this.roles.navigate) {
+				this.root.find('.slide').show();
+				// and scroll to the one we were just on
+				if (this.cur_slide) {
+					var slide= this.slides[this.cur_slide-1];
+					document.documentElement.scrollTop= slide.top();
 				}
 			}
-			this.slide_num= null;
-			this.goToSlide(slide_num, null);
+		} else {
+			if (this.following)
+				this.goToLeaderSlide();
+			// If allowed to navigate, choose the first slide starting after the current scroll pos
+			else if (this.roles.navigate) {
+				if (!next_slide) { // next_slide might be chosen by click event
+					var next_slide= this.cur_slide;
+					for (var i= 0; i < this.slides.length; i++) {
+						if (this.slides[i].top() >= document.documentElement.scrollTop) {
+							next_slide= i+1;
+							break;
+						}
+					}
+				}
+				this.goToSlide(next_slide, null);
+				// ensure other slides get hidden even if cur_slide didn't change
+				this._show_slide(this.cur_slide, null);
+			}
 		}
 	},
 	reconnect: function() {
@@ -319,7 +335,6 @@ window.slides= {
 		this.ws.onclose= function(event) { self._handle_disconnect(event) }
 	},
 	enableLead: function(enable, ev) {
-		console.log('roles', this.roles);
 		if (enable) {
 			if (this.roles.lead) {
 				this.leading= true;
@@ -328,8 +343,7 @@ window.slides= {
 		} else {
 			this.leading= false;
 		}
-		var ckbox= this.root.find('.status-actions .lead input');
-		if (!!ckbox.prop('checked') != !!enable) ckbox.prop('checked', enable);
+		this.root.find('.status-actions .lead input').prop('checked', enable);
 		this._update_status();
 	},
 	enableFollow: function(enable, ev) {
@@ -340,9 +354,8 @@ window.slides= {
 		} else {
 			this.following= false;
 		}
-		var ckbox= this.root.find('.status-actions .follow input');
-		console.log(ckbox, this.root);
-		if (!!ckbox.prop('checked') != !!enable) ckbox.prop('checked', enable);
+		this.root.find('.status-actions .follow input').prop('checked', enable);
+		this._update_status();
 	},
 	enableNavigate: function(enable, ev) {
 		if (enable) {
@@ -352,8 +365,7 @@ window.slides= {
 			if (this.nav_ui)
 				this.nav_ui.hide();
 		}
-		var ckbox= this.root.find('.status-actions .navigate input');
-		if (!!ckbox.prop('checked') != !!enable) ckbox.prop('checked', enable);
+		this.root.find('.status-actions .navigate input').prop('checked', enable);
 	},
 	enableNotes: function(enable, ev) {
 		if (enable) {
@@ -416,7 +428,7 @@ window.slides= {
 		delete this.ws;
 	},
 	_handle_ws_event: function(event) {
-		console.log('ws event: ', event);
+		//console.log('ws event: ', event);
 		if (event.state) {
 			this.sharedState= event.state;
 			if (this.following)
@@ -431,6 +443,9 @@ window.slides= {
 				this.root.find('.status-actions .follow').show();
 				this.root.find('.status-actions .lead').show();
 				this.root.find('.status-actions .notes').show();
+			} else {
+				// initial state for non-lead is to follow
+				this.enableFollow(true);
 			}
 			if (this.roles.navigate || this.roles.lead) {
 				this.root.find('.status-actions .navigate').show();
@@ -451,8 +466,11 @@ window.slides= {
 			) || (e.originalEvent && this._event_is_for_input(e.originalEvent));
 	},
 	_handle_key: function(e) {
+		// Ignore navigation unless granted navigate role
+		if (!this.roles.navigate)
+			return true;
 		// Ignore keys for input elements within the slides
-		if (this._event_is_for_input(e))
+		else if (this._event_is_for_input(e))
 			return true;
 		else if (e.keyCode == 39) // ArrowRight
 			this.navNext();
@@ -467,21 +485,21 @@ window.slides= {
 		return false;
 	},
 	_handle_click: function(e) {
-		console.log('click', e);
 		// Ignore clicks for input elements within the slides
 		if (!this._event_is_for_input(e)) {
+			// Did they click a slide?
 			var slide= e.currentTarget.dataset.slide;
-			if (slide) {
-				if (this.root.find('.slides-sidebar').hasClass('open'))
-					this.togglemenu();
-				this.goToSlide(slide, null);
+			if (slide && this.root.find('.slides-sidebar').hasClass('open')) {
+				// The menu is open. close it.
+				// If allowed to navigate, change the current slide to the one clicked
+				this.togglemenu(this.roles.navigate? slide : null);
 				return false;
 			}
 		}
 		return true;
 	},
 	getSlide: function(slide_num) {
-		console.log('getSlide', slide_num);
+		//console.log('getSlide', slide_num);
 		if (slide_num < 0)
 			slide_num= this.slides.length + 1 + slide_num;
 		if (slide_num < 1)
@@ -539,7 +557,7 @@ window.slides= {
 	},
 	goToLeaderSlide: function() {
 		if (this.sharedState.slide_num)
-			this.goToSlide(this.sharedState.slide_num, this.sharedState.step_num);
+			this.goToSlide(this.sharedState.slide_num||1, this.sharedState.step_num||0);
 	},
 	_show_slide: function(slide_num, step_num) {
 		var slide= this.slides[slide_num-1];

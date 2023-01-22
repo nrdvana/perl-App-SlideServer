@@ -123,6 +123,7 @@ sub init_websocket($self, $c) {
 	if ($mode eq 'presenter') {
 		if (($key||'') eq $self->presenter_key) {
 			$roles{lead}= 1;
+			$roles{navigate}= 1;
 			$self->update_published_state(viewer_count => scalar keys $self->viewers->%*);
 		}
 	}
