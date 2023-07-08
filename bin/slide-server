@@ -7,20 +7,23 @@ use Log::Any::Adapter 'Daemontools', -init => { argv => 1, env => 1 };
 
 #PODNAME: slide-server
 #ABSTRACT: Run a HTTP server that serves the slides and websocket
-#VERSION:
+#VERSION
 
 # in case running in Docker, need signal handlers installed
 $SIG{INT}= $SIG{TERM}= sub { exit 0; };
 
 my %opts= (
-	serve_dir => path($ENV{APP_DATA_PATH} || Cwd::getcwd()),
+	serve_dir => path($ENV{APP_SLIDESERVER_SERVE_DIR} || Cwd::getcwd()),
 );
-$opts{share_dir}= path($ENV{APP_SHARE_DIR}) if length ($ENV{APP_SHARE_DIR} // '');
-$opts{presenter_key}= $ENV{PRESENTER_KEY} if length ($ENV{PRESENTER_KEY} // '');
+$opts{share_dir}= path($ENV{APP_SLIDESERVER_SHARE_DIR})
+	if length ($ENV{APP_SLIDESERVER_SHARE_DIR} // '');
+$opts{presenter_key}= $ENV{APP_SLIDESERVER_PRESENTER_KEY}
+	if length ($ENV{APP_SLIDESERVER_PRESENTER_KEY} // '');
 
 # Allow running from project dir
 push @INC, "$FindBin::RealBin/../lib"
-	if -f "$FindBin::RealBin/../lib/App/SlideServer.pm";
+	if -d "$FindBin::RealBin/../.git"
+	&& -f "$FindBin::RealBin/../lib/App/SlideServer.pm";
 
 require App::SlideServer;
 my $app= App::SlideServer->new(\%opts);
