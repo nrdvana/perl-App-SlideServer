@@ -87,6 +87,8 @@ sub slides_source_file($self, $value=undef) {
 	};
 }
 
+has 'slides_source_monitor';
+
 =head2 share_dir
 
 This is a Mojo::File object of the directory containing the web assets that
@@ -195,8 +197,13 @@ sub build_slides($self, %opts) {
 	$self->log->info("Loaded ".@slides." slides from ".$self->slides_source_file);
 	$page= $self->merge_page_assets($page);
 	$self->cache_token($token);
+	my $page_diff= !$self->page_dom || $self->page_dom ne $page;
+	my @slides_diff= !$self->slides_dom? (0..$#slides)
+		: grep { ($self->slides_dom->[$_]//'') ne ($slides[$_]//'') } 0..$#slides;
 	$self->page_dom($page);
 	$self->slides_dom(\@slides);
+	$self->on_page_changed() if $page_diff;
+	$self->on_slides_changed(\@slides_diff) if @slides_diff;
 	return \@slides;
 }
 
@@ -256,6 +263,28 @@ sub load_slides_html($self, %opts) {
 		$change_token= $st->mtime;
 	}
 	return wantarray? ($content, $change_token) : $content;
+}
+
+sub monitor_source_changes($self, $enable=1) {
+	if ($enable) {
+		my $f= $self->slides_source_file;
+		-f $f or croak "No such file '$f'";
+		# TODO: wrap inotify in an object with a more convenient API and detect things like file renames
+		$self->{_inotify} //= do {
+			require Linux::Inotify2;
+			my $inotify= Linux::Inotify2->new;
+			my $i_fh= IO::Handle->new_from_fd($inotify->fileno, 'r');
+			Mojo::IOLoop->singleton->reactor
+				->io( $i_fh, sub($reactor, $writable) { $inotify->poll if $inotify && !$writable })
+				->watch($i_fh, 1, 0);
+			{ inotify => $inotify, inotify_fh => $i_fh }
+		};
+		Scalar::Util::weaken( my $app= $self );
+		my $watch= $self->{_inotify}{inotify}->watch("$f", Linux::Inotify2::IN_MODIFY(), sub { $app->build_slides });
+		$self->slides_source_monitor($watch);
+	} else {
+		$self->slides_source_monitor(undef);
+	}
 }
 
 =head2 markdown_to_html
@@ -417,7 +446,7 @@ sub serve_page($self, $c) {
 	# Merge the empty page with all currently-visible slides,
 	# which saves the client from needing a second request to fetch them.
 	# TODO: implement slide-by-slide loading
-	my $slide_max= @slides; # $self->published_state->{slide_max} || 0;
+	my $slide_max= $#{$self->slides_dom}; # $self->published_state->{slide_max} || 0;
 	my @slides= $self->slides_dom->@[0..$slide_max];
 	my $combined= Mojo::DOM->new($self->page_dom);
 	$combined->at('div.slides')->append_content(join '', @slides);
@@ -507,6 +536,31 @@ sub on_viewer_disconnect($self, $c) {
 	delete $self->viewers->{$id};
 	$self->update_published_state(viewer_count => scalar keys $self->viewers->%*);
 }
+
+sub on_page_changed($self) {
+	$_->send({ json => { page_changed => 1 } })
+		for values $self->viewers->%*;
+}
+
+sub on_slides_changed($self, $changed) {
+	$_->send({ json => { slides_changed => $changed } })
+		for values $self->viewers->%*;
+}
+
+=head1 EXPORTS
+
+=head2 mojo2logany
+
+  ->new(log => mojo2logany);
+  ->new(log => mojo2logany("channel::name"));
+  ->new(log => mojo2logany($logger));
+
+This is a convenience function that returns a L<Mojo::Log> object which passes
+all logging events to a Log::Any logging channel.  I like the L<Log::Any>
+ecosystem and it's a little messy to redirect the logs without a utility
+function.
+
+=cut
 
 use Exporter 'import';
 our @EXPORT_OK= qw( mojo2logany );

@@ -446,6 +446,13 @@ window.slides= {
 				this.root.find('.status-actions .navigate').show();
 			}
 		}
+		if (event.page_changed) {
+			window.location.reload();
+		}
+		if (event.slides_changed) {
+			// TODO: graceful slide load
+			window.location.reload();
+		}
 	},
 	send_ws_message: function(obj) {
 		if (this.ws)
