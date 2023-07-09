@@ -192,6 +192,7 @@ sub build_slides($self, %opts) {
 	my ($html, $token)= $self->load_slides_html(if_changed => $self->cache_token);
 	return 0 unless defined $html; # undef if source file unchanged
 	my ($page, @slides)= $self->extract_slides_dom($html);
+	$self->log->info("Loaded ".@slides." slides from ".$self->slides_source_file);
 	$page= $self->merge_page_assets($page);
 	$self->cache_token($token);
 	$self->page_dom($page);
@@ -413,7 +414,15 @@ sub serve_page($self, $c) {
 		eval { $self->build_slides; 1 }
 			or $self->log->error($@);
 	}
-	$c->render(text => ''.$self->page_dom);
+	# Merge the empty page with all currently-visible slides,
+	# which saves the client from needing a second request to fetch them.
+	# TODO: implement slide-by-slide loading
+	my $slide_max= @slides; # $self->published_state->{slide_max} || 0;
+	my @slides= $self->slides_dom->@[0..$slide_max];
+	my $combined= Mojo::DOM->new($self->page_dom);
+	$combined->at('div.slides')->append_content(join '', @slides);
+	
+	$c->render(text => ''.$combined);
 }
 
 sub serve_slides($self, $c) {
@@ -453,7 +462,7 @@ sub init_slidelink($self, $c) {
 		}
 	}
 	$c->stash('roles', join ',', keys %roles);
-	$self->log->infof("%s (%s) connected as %s", $id, $c->tx->remote_address, $c->stash('roles'));
+	$self->log->info(sprintf "%s (%s) connected as %s", $id, $c->tx->remote_address, $c->stash('roles'));
 	$c->send({ json => { roles => [ keys %roles ] } });
 	
 	$c->on(json => sub($c, $msg, @) { $c->app->on_viewer_message($c, $msg) });
