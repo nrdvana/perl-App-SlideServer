@@ -271,7 +271,6 @@ sub markdown_to_html($self, $md, %opts) {
 	return markdown($md, extensions => (
 		HOEDOWN_EXT_TABLES | HOEDOWN_EXT_FENCED_CODE | HOEDOWN_EXT_AUTOLINK | HOEDOWN_EXT_STRIKETHROUGH
 		| HOEDOWN_EXT_UNDERLINE | HOEDOWN_EXT_QUOTE | HOEDOWN_EXT_SUPERSCRIPT | HOEDOWN_EXT_NO_INTRA_EMPHASIS
-		| HOEDOWN_EXT_DISABLE_INDENTED_CODE
 		)
 	);
 }
@@ -315,7 +314,7 @@ sub extract_slides_dom($self, $html, %opts) {
 		else {
 			# Ignore whitespace nodes when not in a current slide
 			next if !defined $cur_slide && $node->type eq 'text' && $node->text !~ /\S/;
-			push @slides, ($cur_slide= Mojo::DOM->new('<div class="slide"></div>'))
+			push @slides, ($cur_slide= Mojo::DOM->new('<div class="slide"></div>')->at('div'))
 				if !defined $cur_slide
 					|| $self->_node_starts_slide($node, $tag);
 			# Add "auto-step" to any <UL> tags
