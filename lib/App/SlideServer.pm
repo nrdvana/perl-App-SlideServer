@@ -22,23 +22,25 @@ use Carp;
 
 This class is a fairly simple Mojo web application that serves a small
 directory of files, one of which is a Markdown or HTML document containing
-your slides.
+your slides.  The slides then use the provided JavaScript to create a
+presentation similar to other popular software, and a user interface for
+the presenter.  As a bonus, you can make any number of connections to the
+server and synchronize the slide show over a websocket, allowing viewers
+to follow the presenter, or the presenter to flip slides from a different
+device than is connected to the projector (like a tablet or phone).
 
 On startup, the application upgrades your slides to a proper HTML structure
 (see L<HTML SPECIFICATION>) possibly by first running it through a Markdown
 renderer if you provided the slides as markdown instead of HTML.  It then
-inspects the HTML and breaks it apart into one or more slides (by default,
-splitting on all H1, H2, H3, HR, or any C<< <div class="slide"> >> elements).
+inspects the HTML and breaks it apart into one or more slides.
 
 You may then start the Mojo application as a webserver, or whatever else you
 wanted to do with the Mojo API.
 
 The application comes with a collection of web assets that render your HTML
-to look like "normal" slides that you would expect for a live presentation.
-The default javascript downloads the slides one at a time, and only after
-the "presenter" connection has advanced to the slide, so viewers can only
-see as much as you have allowed them to see.  Users can scroll backward to
-look at earlier slides, if you allow them to (controlled with javascript).
+to fit fullscreen in a browser window, and to provide a user interface to the
+presenter that shows navigation buttons and private notes for giving the
+presentation.
 
 =head1 CONSTRUCTOR
 
@@ -581,3 +583,50 @@ sub mojo2logany($logger= undef) {
 }
 
 1;
+
+__END__
+
+=head1 HTML SPECIFICATION
+
+The page must contain a C<< <div class="slides"> >> somewhere inside the C<< <body> >>.
+All slides are C<< <div class="slide"> >> and must occur as direct children of the
+C<div.slides> element.
+
+Inside a C<div.slide> element, the elements may belong to iterative steps.
+This is indicated using the C<< data-step="..." >> attribute.  The notation
+for that attribute can be a single integer, meaning the element becomes visible
+at that step C<< data-step="2" >>, or a list of ranges of integers indicating
+which exact steps the element will be visible C<< data-step="2-3,5-5" >>.
+Step number 0 is initially visible when the slide comes up (so you don't need
+to specify number 0 anywhere, because it's already visible).
+
+To ease the common scenario of assigning steps to a bullet list, you may
+put the C< .auto-step > class on any element, and its child elements will
+receive sequential step numbers starting from the C<step> value of that
+element, defaulting to 1.
+
+Each C<div.slide> may contain a C<div.notes>, which is only visible to the
+presenter.  (TODO: currently this is only enforced with css, but should be
+handled in the back-end)
+
+=head2 Convenient Translations
+
+If you don't provide a C<div.slides> element, one will be added under C<body>.
+If you don't have a C<body> tag, one will be added for you as well.
+
+If you put elements other than C<div.slide> under the C<div.slides> element
+in your source file, they will be automatically broken into slides as follows:
+
+=over
+
+=item C<< <h1> <h2> <h3> >>
+
+These each trigger the start of a new slide
+
+=item C<< <hr> >>
+
+This begins a new slide while deleting the C<< <hr> >> element,
+useful when you have slides without headers.
+
+=back
+
