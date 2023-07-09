@@ -231,8 +231,15 @@ sub load_slides_html($self, %opts) {
 	}
 	elsif (ref $srcfile eq 'GLOB' || (ref($srcfile) && ref($srcfile)->isa('IO::Handle'))) {
 		return undef
-			if defined $opts{if_changed} && 0+$srcfile == $opts{if_changed};
-		
+			if defined $opts{if_changed} && (0+$srcfile) .'_'. tell($srcfile) eq $opts{if_changed};
+		seek($srcfile, 0, 0) || die "seek: $!"
+			unless tell($srcfile) <= 0;
+		$content= do { local $/= undef; <$srcfile> };
+		utf8::decode($content) unless PerlIO::get_layers($srcfile) =~ /encoding|utf8/i;
+		# Assume markdown unless first non-whitespace is the start of a tag
+		$content= $self->markdown_to_html($content, %opts)
+			unless $srcfile =~ /^\s*</;
+		$change_token= (0+$srcfile) .'_'. tell($srcfile);
 	}
 	else {
 		my $st= stat($srcfile)
