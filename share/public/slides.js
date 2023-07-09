@@ -73,17 +73,12 @@ Slide.prototype.scaleTo= function(viewport_w, viewport_h) {
 	var el_h= $(this.el).innerHeight();
 	var xscale= viewport_w / el_w;
 	var yscale= viewport_h / el_h;
+	var ypad= parseInt((viewport_h - el_h)/2)+'px';
+	// console.log('xscale',xscale,'yscale',yscale,'viewport_w',viewport_w,'el_w',el_w,'viewport_h',viewport_h,'el_h',el_h,'ypad',ypad);
 	// Example:
 	// 50x10 inside 100x60, xscale=2, yscale=6, pad h with 40, 20 top 20 bottom 
-	if (xscale < yscale) {
-		var ypad= parseInt((viewport_h - xscale * el_h)/2)+'px';
-		var transform= 'scale('+xscale+','+xscale+')';
-		$(this.el).css('margin', ypad+' 0').css('transform', transform);
-	} else {
-		var ypad= parseInt((viewport_h - el_h)/2)+'px';
-		var transform= 'scale('+yscale+','+yscale+')';
-		$(this.el).css('margin', ypad+' 0').css('transform', transform);
-	}
+	var scale= (xscale < yscale)? xscale : yscale;
+	$(this.el).css('margin', ypad+' 0').css('transform', 'scale('+scale+','+scale+')');
 }
 Slide.prototype.top= function() { return $(this.el).offset().top }
 Slide.prototype.show= function(show) { show? $(this.el).show() : $(this.el).hide(); return this }
