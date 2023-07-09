@@ -82,8 +82,9 @@ sub slides_source_file($self, $value=undef) {
 			$self->serve_dir->child('slides.html'),
 			$self->serve_dir->child('slides.md'),
 			$self->serve_dir->child('public','slides.html'),
-			$self->serve_dir->child('public','slides.md'),
-	}
+			$self->serve_dir->child('public','slides.md');
+		$src;
+	};
 }
 
 =head2 share_dir
@@ -490,6 +491,24 @@ sub on_viewer_disconnect($self, $c) {
 	#Mojo::IOLoop->remove($keepalive);
 	delete $self->viewers->{$id};
 	$self->update_published_state(viewer_count => scalar keys $self->viewers->%*);
+}
+
+use Exporter 'import';
+our @EXPORT_OK= qw( mojo2logany );
+
+# Utility method to create a Mojo logger that logs to Log::Any
+sub mojo2logany($logger= undef) {
+	require Mojo::Log;
+	require Log::Any;
+	if (defined $logger && !ref $logger) {
+		$logger= Log::Any->get_logger(category => $logger);
+	} elsif (!defined $logger) {
+		$logger= Log::Any->get_logger;
+	}
+	my $mlog= Mojo::Log->new;
+	$mlog->unsubscribe('message');
+	$mlog->on(message => sub($app, $level, @lines) { $logger->$level(join ' ', @lines) });
+	$mlog;
 }
 
 1;

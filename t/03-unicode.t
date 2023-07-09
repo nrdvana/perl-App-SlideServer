@@ -4,7 +4,8 @@ use utf8;
 use Test::More;
 use Test::Mojo;
 use File::Temp;
-use App::SlideServer;
+use Log::Any::Adapter 'TAP';
+use App::SlideServer 'mojo2logany';
 
 my $nanika= chr(0x4F55).chr(0x304B);
 
@@ -25,8 +26,8 @@ subtest html => sub {
 	$f->seek(0,0);
 	
 	for my $ss (
-		App::SlideServer->new(slides_source_file => \$html),
-		App::SlideServer->new(slides_source_file => "$f"),
+		App::SlideServer->new(slides_source_file => \$html, log => mojo2logany()),
+		App::SlideServer->new(slides_source_file => "$f",   log => mojo2logany()),
 		#App::SlideServer->new(slides_source_file => $f),
 	) {
 		like( $ss->load_slides_html, qr/$nanika/, 'contains high chars' );

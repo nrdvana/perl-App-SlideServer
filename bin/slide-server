@@ -3,7 +3,16 @@ use v5.36;
 use FindBin;
 use Cwd;
 use Mojo::File 'path';
-use Log::Any::Adapter 'Daemontools', -init => { argv => 1, env => 1 };
+use Log::Any '$log';
+use Log::Any::Adapter 'Daemontools',
+	-init => { argv => 1, env => 1, signals => ['USR1','USR2'] };
+BEGIN {
+	# Allow running from project dir
+	push @INC, "$FindBin::RealBin/../lib"
+		if -d "$FindBin::RealBin/../.git"
+		&& -f "$FindBin::RealBin/../lib/App/SlideServer.pm";
+}
+use App::SlideServer 'mojo2logany';
 
 #PODNAME: slide-server
 #ABSTRACT: Run a HTTP server that serves the slides and websocket
@@ -13,6 +22,7 @@ use Log::Any::Adapter 'Daemontools', -init => { argv => 1, env => 1 };
 $SIG{INT}= $SIG{TERM}= sub { exit 0; };
 
 my %opts= (
+	log => mojo2logany(),
 	serve_dir => path($ENV{APP_SLIDESERVER_SERVE_DIR} || Cwd::getcwd()),
 );
 $opts{share_dir}= path($ENV{APP_SLIDESERVER_SHARE_DIR})
@@ -20,12 +30,6 @@ $opts{share_dir}= path($ENV{APP_SLIDESERVER_SHARE_DIR})
 $opts{presenter_key}= $ENV{APP_SLIDESERVER_PRESENTER_KEY}
 	if length ($ENV{APP_SLIDESERVER_PRESENTER_KEY} // '');
 
-# Allow running from project dir
-push @INC, "$FindBin::RealBin/../lib"
-	if -d "$FindBin::RealBin/../.git"
-	&& -f "$FindBin::RealBin/../lib/App/SlideServer.pm";
-
-require App::SlideServer;
 my $app= App::SlideServer->new(\%opts);
 
 push @ARGV, qw( daemon -l http://*:2000 ) unless @ARGV;
