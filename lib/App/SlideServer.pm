@@ -4,8 +4,10 @@ use Mojo::Base 'Mojolicious';
 use Mojo::WebSocket 'WS_PING';
 use Mojo::File 'path';
 use Mojo::DOM;
-use Log::Any '$log';
+use Scalar::Util 'looks_like_number';
+use File::stat;
 use Text::Markdown::Hoedown;
+use Carp;
 
 #VERSION
 #ABSTRACT: Mojo web server that serves slides and websocket
@@ -115,9 +117,9 @@ printed on STDOUT where (presumably) only you can see it.
 
 # A secret known only to whoever starts the server
 # Clients must send this to gain presenter permission.
-has presenter_key => sub {
+has presenter_key => sub($self) {
 	my $key= sprintf "%06d", rand 1000000;
-	$log->info("Auto-generated presenter key: $key");
+	$self->log->info("Auto-generated presenter key: $key");
 	return $key;
 };
 
@@ -156,17 +158,15 @@ This is an arrayref of the individual slides (Mojo::DOM objects) that the
 application serves.  This is a cached output of L</build_slides> and may be
 rebuilt at any time.
 
+=head2 cache_token
+
+A value (usually an mtime) that is used by L</load_slides_html> to determine
+if the source content has changed.  You can clear this value to force
+L</build_slides> to perform a rebuild.
+
 =cut
 
-has ['index_page', 'slides'];
-
-sub startup($self) {
-	$self->build_slides;
-	$self->presenter_key;
-	$self->static->paths([ $self->share_dir->child('public'), $self->serve_dir->child('public') ]);
-	$self->routes->get('/' => sub($c){ $c->render(text => $c->app->render_slides) });
-	$self->routes->websocket('/slidelink.io' => sub($c){ $c->app->init_websocket($c) });
-}
+has ['cache_token', 'page_dom', 'slides_dom'];
 
 =head1 METHODS
 
@@ -187,10 +187,12 @@ source file changes. (detected lazily when serving '/')
 
 =cut
 
-sub build_slides($self) {
-	my $html= $self->load_slides_html;
+sub build_slides($self, %opts) {
+	my ($html, $token)= $self->load_slides_html(if_changed => $self->cache_token);
+	return 0 unless defined $html; # undef if source file unchanged
 	my ($page, @slides)= $self->extract_slides_dom($html);
 	$page= $self->merge_page_assets($page);
+	$self->cache_token($token);
 	$self->page_dom($page);
 	$self->slides_dom(\@slides);
 	return \@slides;
@@ -198,18 +200,53 @@ sub build_slides($self) {
 
 =head2 load_slides_html
 
+  $html= $app->load_slides_html;
+  ($html, $token)= $app->load_slides_html(if_changed => $token)
+
 Reads L</slides_source_file>, calls L</markdown_to_html> if it was markdown,
-and returns the content as a string.
+and returns the content as a string I<of characters>, not bytes.
+
+In list context, this returns both the content and a token value that can be
+used to test if the content changed (usually file mtime) on the next call
+using the 'if_changed' option.  If you pass the 'if_chagned' value and the
+content has I<not> changed, this returns undef.
 
 =cut
 
-sub load_slides_html($self) {
-	my $srcfile= $self->slides_source_file
+sub load_slides_html($self, %opts) {
+	my $srcfile= $self->slides_source_file;
+	defined $srcfile
 		or croak "No source file; require slides.md or slides.html in serve_dir '".$self->serve_dir."'\n";
-	my $content= $srcfile->slurp;
-	$content= $self->markdown_to_html($content)
-		if $srcfile =~ /[.]md$/;
-	return $content;
+	# Allow literal data with a scalar ref
+	my ($content, $change_token);
+	if (ref $srcfile eq 'SCALAR') {
+		return undef
+			if defined $opts{if_changed} && 0+$srcfile == $opts{if_changed};
+		$content= $$srcfile;
+		$change_token= 0+$srcfile;
+		# Assume markdown unless first non-whitespace is the start of a tag
+		$content= $self->markdown_to_html($content, %opts)
+			unless $srcfile =~ /^\s*</;
+	}
+	elsif (ref $srcfile eq 'GLOB' || (ref($srcfile) && ref($srcfile)->isa('IO::Handle'))) {
+		return undef
+			if defined $opts{if_changed} && 0+$srcfile == $opts{if_changed};
+		
+	}
+	else {
+		my $st= stat($srcfile)
+			or croak "Can't stat '$srcfile'";
+		return undef
+			if defined $opts{if_changed} && $st->mtime == $opts{if_changed};
+		
+		$content= path($srcfile)->slurp;
+		utf8::decode($content); # Could try to detect encoding, but people should just use utf-8
+
+		$content= $self->markdown_to_html($content, %opts)
+			if $srcfile =~ /[.]md$/;
+		$change_token= $st->mtime;
+	}
+	return wantarray? ($content, $change_token) : $content;
 }
 
 =head2 markdown_to_html
@@ -217,12 +254,12 @@ sub load_slides_html($self) {
   $html= $app->markdown_to_html($md);
 
 This is a simple wrapper around Markdown::Hoedown with most of the syntax
-options enabled.  You can substitute any markdown processor you like in a
-subclass.
+options enabled.  You can substitute any markdown processor you like by
+overriding this method in a subclass.
 
 =cut
 
-sub markdown_to_html($self, $md) {
+sub markdown_to_html($self, $md, %opts) {
 	return markdown($md, extensions => (
 		HOEDOWN_EXT_TABLES | HOEDOWN_EXT_FENCED_CODE | HOEDOWN_EXT_AUTOLINK | HOEDOWN_EXT_STRIKETHROUGH
 		| HOEDOWN_EXT_UNDERLINE | HOEDOWN_EXT_QUOTE | HOEDOWN_EXT_SUPERSCRIPT | HOEDOWN_EXT_NO_INTRA_EMPHASIS
@@ -250,12 +287,12 @@ sub _node_splits_slide($self, $node, $tag) {
 	return $tag eq 'HR';
 }
 
-sub extract_slides_dom($self, $html) {
+sub extract_slides_dom($self, $html, %opts) {
 	my $dom= Mojo::DOM->new($html);
 	# Find each element that is an immediate child of body, and add it to
 	# the current slide until the next <h1> <h2> <h3> <hr> or <div class="slide">
 	# at which point, move to the next slide.
-	my @slides, $cur_slide;
+	my (@slides, $cur_slide);
 	for my $node (($dom->at('div.slides') || $dom->at('body') || $dom)->@*) {
 		$node->remove;
 		my $tag= uc($node->tag // '');
@@ -268,6 +305,8 @@ sub extract_slides_dom($self, $html) {
 			$cur_slide= undef;
 		}
 		else {
+			# Ignore whitespace nodes when not in a current slide
+			next if !defined $cur_slide && $node->type eq 'text' && $node->text !~ /\S/;
 			push @slides, ($cur_slide= Mojo::DOM->new('<div class="slide"></div>'))
 				if !defined $cur_slide
 					|| $self->_node_starts_slide($node, $tag);
@@ -279,7 +318,18 @@ sub extract_slides_dom($self, $html) {
 	return ($dom, @slides);
 }	
 
-sub merge_page_assets($self, $srcdom) {
+=head2 merge_page_assets
+
+  $merged_dom= $app->merge_page_assets($src_dom);
+
+This starts with the page_template.html shipped with the module, then adds
+any <head> tags from the source file, then merges the body or div.slides tags
+from the source file.  It is assumed the slides have already been removed
+from C<$src_dom>.
+
+=cut
+
+sub merge_page_assets($self, $srcdom, %opts) {
 	my $page= Mojo::DOM->new($self->share_dir->child('page_template.html')->slurp);
 	if (my $srchead= $srcdom->at('head')) {
 		my $pagehead= $page->at('head');
@@ -317,15 +367,72 @@ sub update_published_state($self, @new_attrs) {
 		for values $self->viewers->%*;
 }
 
-=head2 init_websocket
+=head1 EVENT METHODS
 
-Handle an incoming websocket connection.  This method determines whether the
+=head2 serve_page
+
+  GET /
+
+Returns the root page, without any slides.
+
+=head2 serve_slides
+
+  GET /slides
+  GET /slides?i=5
+
+Returns HTML for one or more slides.
+
+=head2 init_slidelink
+
+  GET /slidelink.io
+
+Open a websocket connection.  This method determines whether the
 new connection is a presenter or not, and then sets up the events and adds it
 to L</viewers> and pushes out a copy of L</published_state> to the new client.
 
 =cut
 
-sub init_websocket($self, $c) {
+sub startup($self) {
+	$self->build_slides;
+	$self->presenter_key;
+	$self->static->paths([ $self->share_dir->child('public'), $self->serve_dir->child('public') ]);
+	$self->routes->get('/' => sub($c){ $c->app->serve_page($c) });
+	$self->routes->get('/slides' => sub($c){ $c->app->serve_slides($c) });
+	$self->routes->websocket('/slidelink.io' => sub($c){ $c->app->init_slidelink($c) });
+}
+
+sub serve_page($self, $c) {
+	if (!defined $self->page_dom || $self->cache_token) {
+		eval { $self->build_slides; 1 }
+			or $self->log->error($@);
+	}
+	$c->render(text => ''.$self->page_dom);
+}
+
+sub serve_slides($self, $c) {
+	my $slides= $self->slides_dom;
+	my $max_slide= ($c->stash('roles') =~ /\blead\b/)? $#$slides
+		: $self->published_state->{slide_max} // 0;
+	my $result= '';
+	my $i= $c->req->every_param('i');
+	if ($i && @$i) {
+		for (@$i) {
+			unless (looks_like_number($_) && $_ >= 0 && $_ <= $max_slide) {
+				$c->code(422);
+				$c->message('Invalid slide number');
+				return;
+			}
+			$result .= $slides->[$_];
+		}
+	} else {
+		for (0 .. $max_slide) {
+			$result .= $slides->[$_];
+		}
+	}
+	$c->render(text => $result);
+}
+
+sub init_slidelink($self, $c) {
 	my $id= $c->req->request_id;
 	$self->viewers->{$id}= $c;
 	my $mode= $c->req->param('mode');
@@ -339,7 +446,7 @@ sub init_websocket($self, $c) {
 		}
 	}
 	$c->stash('roles', join ',', keys %roles);
-	$log->infof("%s (%s) connected as %s", $id, $c->tx->remote_address, $c->stash('roles'));
+	$self->log->infof("%s (%s) connected as %s", $id, $c->tx->remote_address, $c->stash('roles'));
 	$c->send({ json => { roles => [ keys %roles ] } });
 	
 	$c->on(json => sub($c, $msg, @) { $c->app->on_viewer_message($c, $msg) });
@@ -361,12 +468,18 @@ Handle a disconnect event form a websocket.
 
 sub on_viewer_message($self, $c, $msg) {
 	my $id= $c->req->request_id;
-	$log->debugf("client %s %s msg=%s", $id, $c->tx->original_remote_address, $msg) if $log->is_debug;
+	$self->log->debug(sprintf "client %s %s msg=%s", $id, $c->tx->original_remote_address, $msg);
 	if ($c->stash('roles') =~ /\blead\b/) {
 		if (defined $msg->{extern}) {
 		}
 		if (defined $msg->{slide_num}) {
-			$self->update_published_state(slide_num => $msg->{slide_num}, step_num => $msg->{step_num});
+			$self->update_published_state(
+				slide_num => $msg->{slide_num},
+				step_num => $msg->{step_num},
+				($msg->{slide_num} > ($self->published_state->{slide_max}//0)?
+					( slide_max => $msg->{slide_num} ) : ()
+				)
+			);
 		}
 	}
 #	if ($c->stash('roles') =~ /\b
