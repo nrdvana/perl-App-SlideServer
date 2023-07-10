@@ -317,13 +317,13 @@ page, and one Mojo::DOM object for each detected slide, as a list.
 =cut
 
 sub _node_is_slide($self, $node, $tag) {
-	return $tag eq 'DIV' && $node->{class} =~ /\bslide\b/;
+	return $tag eq 'div' && $node->{class} =~ /\bslide\b/;
 }
 sub _node_starts_slide($self, $node, $tag) {
-	return $tag eq 'H1' || $tag eq 'H2' || $tag eq 'H3';
+	return $tag eq 'h1' || $tag eq 'h2' || $tag eq 'h3';
 }
 sub _node_splits_slide($self, $node, $tag) {
-	return $tag eq 'HR';
+	return $tag eq 'hr';
 }
 
 sub extract_slides_dom($self, $html, %opts) {
@@ -334,7 +334,7 @@ sub extract_slides_dom($self, $html, %opts) {
 	my (@slides, $cur_slide);
 	for my $node (($dom->at('div.slides') || $dom->at('body') || $dom)->@*) {
 		$node->remove;
-		my $tag= uc($node->tag // '');
+		my $tag= $node->tag // '';
 		# is it a whole pre-defined slide?
 		if ($self->_node_is_slide($node, $tag)) {
 			$cur_slide= undef;
@@ -350,7 +350,15 @@ sub extract_slides_dom($self, $html, %opts) {
 				if !defined $cur_slide
 					|| $self->_node_starts_slide($node, $tag);
 			# Add "auto-step" to any <UL> tags
-			$node->{class}= "auto-step" if ($tag eq 'UL' || $tag eq 'OL') && !$node->{class};
+			if (($tag eq 'ul' || $tag eq 'ol') && !$node->{class}) {
+				$node->{class}= "auto-step";
+				# Now apply auto-step recursively to <ol> and <ul>
+				use DDP;
+				&p([ before => "$node" ]);
+				$node->find('ol')->map(sub{ $_->{class}= $_->{class}? "$_->{class} auto-step" : 'auto-step' });
+				$node->find('ul')->map(sub{ $_->{class}= $_->{class}? "$_->{class} auto-step" : 'auto-step' });
+				&p([ after => "$node" ]);
+			}
 			$cur_slide->append_content($node);
 		}
 	}
@@ -515,7 +523,7 @@ Handle a disconnect event form a websocket.
 
 sub on_viewer_message($self, $c, $msg) {
 	my $id= $c->req->request_id;
-	$self->log->debug(sprintf "client %s %s msg=%s", $id, $c->tx->original_remote_address, $msg);
+	$self->log->debug(sprintf "client %s %s msg=%s", $id, $c->tx->original_remote_address//'', $msg//'');
 	if ($c->stash('roles') =~ /\blead\b/) {
 		if (defined $msg->{extern}) {
 		}

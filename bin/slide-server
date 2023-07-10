@@ -9,8 +9,7 @@ use Log::Any::Adapter 'Daemontools',
 BEGIN {
 	# Allow running from project dir
 	push @INC, "$FindBin::RealBin/../lib"
-		if -d "$FindBin::RealBin/../.git"
-		&& -f "$FindBin::RealBin/../lib/App/SlideServer.pm";
+		if -f "$FindBin::RealBin/../lib/App/SlideServer.pm";
 }
 use App::SlideServer 'mojo2logany';
 
