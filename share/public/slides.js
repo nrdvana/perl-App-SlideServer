@@ -138,7 +138,10 @@ window.slides= {
 		if (!config.websocket_url)
 			config.websocket_url= 'slidelink.io'
 		if (!config.mode) {
-			config.mode= window.location.hash.match('presenter')? 'presenter' : 'obs'
+			var match= window.location.hash.match('presenter(=[0-9]*)?');
+			config.mode= match? 'presenter' : 'obs';
+			if (match && match[1]) config.key= match[1].substr(1);
+			console.log(config, match, window.location.hash);
 		}
 		if (!('code_highlight' in config) && window.hljs)
 			config.code_highlight= function(el){ window.hljs.highlightElement(el) }
@@ -318,10 +321,10 @@ window.slides= {
 				url= loc.pathname + (loc.pathname.endsWith('/')? '' : '/') + url;
 			url= (loc.protocol == 'https:'? 'wss://' : 'ws://') + window.location.host + url;
 		}
-		var key= '';
+		var key= this.config.key;
 		var mode= this.config.mode;
-		if (mode != 'obs')
-			key= window.prompt('Key');
+		if (mode != 'obs' && !key)
+			this.config.key= key= window.prompt('Key');
 		// Connect WebSocket to local event server
 		this._set_conn_note('<p>Connecting...</p>')
 		this.ws= new WebSocket(url+'?mode='+mode+'&key='+encodeURIComponent(key));
