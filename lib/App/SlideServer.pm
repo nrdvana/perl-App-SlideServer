@@ -353,11 +353,8 @@ sub extract_slides_dom($self, $html, %opts) {
 			if (($tag eq 'ul' || $tag eq 'ol') && !$node->{class}) {
 				$node->{class}= "auto-step";
 				# Now apply auto-step recursively to <ol> and <ul>
-				use DDP;
-				&p([ before => "$node" ]);
 				$node->find('ol')->map(sub{ $_->{class}= $_->{class}? "$_->{class} auto-step" : 'auto-step' });
 				$node->find('ul')->map(sub{ $_->{class}= $_->{class}? "$_->{class} auto-step" : 'auto-step' });
-				&p([ after => "$node" ]);
 			}
 			$cur_slide->append_content($node);
 		}
