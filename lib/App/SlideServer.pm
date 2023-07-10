@@ -469,7 +469,7 @@ to L</viewers> and pushes out a copy of L</published_state> to the new client.
 sub startup($self) {
 	$self->build_slides;
 	$self->presenter_key;
-	$self->static->paths([ $self->share_dir->child('public'), $self->serve_dir->child('public') ]);
+	$self->static->paths([ $self->serve_dir->child('public'), $self->share_dir->child('public') ]);
 	$self->routes->get('/' => sub($c){ $c->app->serve_page($c) });
 	$self->routes->get('/slides' => sub($c){ $c->app->serve_slides($c) });
 	$self->routes->websocket('/slidelink.io' => sub($c){ $c->app->init_slidelink($c) });
