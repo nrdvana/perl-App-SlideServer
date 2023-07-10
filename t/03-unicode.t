@@ -45,12 +45,12 @@ my $md= <<~MD;
 my $md_f= tempfile_containing($md, SUFFIX => '.md');
 
 for (
-	[ html_scalar => App::SlideServer->new(slides_source_file => \$html,    log => mojo2logany()) ],
-	[ html_fname  => App::SlideServer->new(slides_source_file => "$html_f", log => mojo2logany()) ],
-	[ html_handle => App::SlideServer->new(slides_source_file => $html_f,   log => mojo2logany()) ],
-	[ md_scalar   => App::SlideServer->new(slides_source_file => \$md,      log => mojo2logany()) ],
-	[ md_fname    => App::SlideServer->new(slides_source_file => "$md_f",   log => mojo2logany()) ],
-	[ md_handle   => App::SlideServer->new(slides_source_file => $md_f,     log => mojo2logany()) ],
+	[ html_scalar => App::SlideServer->new(slides_source_file => \$html,    log => mojo2logany(), presenter_key => 'x') ],
+	[ html_fname  => App::SlideServer->new(slides_source_file => "$html_f", log => mojo2logany(), presenter_key => 'x') ],
+	[ html_handle => App::SlideServer->new(slides_source_file => $html_f,   log => mojo2logany(), presenter_key => 'x') ],
+	[ md_scalar   => App::SlideServer->new(slides_source_file => \$md,      log => mojo2logany(), presenter_key => 'x') ],
+	[ md_fname    => App::SlideServer->new(slides_source_file => "$md_f",   log => mojo2logany(), presenter_key => 'x') ],
+	[ md_handle   => App::SlideServer->new(slides_source_file => $md_f,     log => mojo2logany(), presenter_key => 'x') ],
 ) {
 	my ($name, $ss)= @$_;
 	subtest $name => sub {

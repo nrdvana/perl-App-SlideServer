@@ -35,7 +35,7 @@ my $md= <<~MD;
 	</code>
 	MD
 
-my $ss= App::SlideServer->new(slides_source_file => \$md, log => mojo2logany());
+my $ss= App::SlideServer->new(slides_source_file => \$md, log => mojo2logany(), presenter_key => 'x');
 
 eval {
 	my @slides= $ss->slides_dom->@*;
