@@ -8,6 +8,10 @@ use Log::Any::Adapter 'TAP';
 use App::SlideServer 'mojo2logany';
 
 my $md= <<~MD;
+	<title>Test</title>
+	<head><style>body { color: white; }</style></head>
+	<script>window.alert("x")</script>
+
 	## Heading 2
 	
 	  * Bullet 1
@@ -22,6 +26,8 @@ my $md= <<~MD;
 	
 	    Code block 2
 		More Code
+	
+	<notes>Some Notes</notes>
 	
 	<h1>Heading 1</h1>
 	
@@ -42,6 +48,7 @@ eval {
 	like( $slides[1]->at('div.slide code')->text, qr/More Code/ );
 	
 	like( $slides[2]->at('div.slide code')->text, qr/Code block 2/ );
+	like( $slides[2]->at('div.slide pre.notes')->text, qr/Some Notes/ );
 	
 	like( $slides[3]->at('div.slide h1')->text, qr/Heading 1/ );
 	like( $slides[3]->at('div.slide code')->text, qr/Code block 3/ );

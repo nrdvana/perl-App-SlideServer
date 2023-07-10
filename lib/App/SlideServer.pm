@@ -328,11 +328,30 @@ sub _node_splits_slide($self, $node, $tag) {
 
 sub extract_slides_dom($self, $html, %opts) {
 	my $dom= Mojo::DOM->new($html);
+	my @head_tags= qw( head title script link style base meta );
+	my @move_to_head;
+	my $slide_root= $dom->at('div.slides') || $dom->at('body') || $dom;
+	for my $tag (@head_tags) {
+		for my $el ($slide_root->find("$tag")->each) {
+			push @move_to_head, $el;
+			# The markdown processor puts <p> tags on any raw html it wasn't expecting,
+			my $parent= $el->parent;
+			$el->remove;
+			$parent->remove if $parent->tag eq 'p' && $parent =~ m|^<p>\s*</p>|;
+		}
+	}
+	for my $el ($slide_root->find('notes')->each) {
+		$el->tag('pre');
+		$el->{class}= 'notes';
+		my $parent= $el->parent;
+		$parent->strip if $parent->tag eq 'p'; # markdown processor adds <p> tags
+	}
+	
 	# Find each element that is an immediate child of body, and add it to
 	# the current slide until the next <h1> <h2> <h3> <hr> or <div class="slide">
 	# at which point, move to the next slide.
 	my (@slides, $cur_slide);
-	for my $node (($dom->at('div.slides') || $dom->at('body') || $dom)->@*) {
+	for my $node ($slide_root->@*) {
 		$node->remove;
 		my $tag= $node->tag // '';
 		# is it a whole pre-defined slide?
@@ -346,7 +365,7 @@ sub extract_slides_dom($self, $html, %opts) {
 		else {
 			# Ignore whitespace nodes when not in a current slide
 			next if !defined $cur_slide && $node->type eq 'text' && $node->text !~ /\S/;
-			push @slides, ($cur_slide= Mojo::DOM->new('<div class="slide"></div>')->at('div'))
+			push @slides, ($cur_slide= Mojo::DOM->new_tag('div', class => 'slide')->[0])
 				if !defined $cur_slide
 					|| $self->_node_starts_slide($node, $tag);
 			# Add "auto-step" to any <UL> tags
@@ -357,6 +376,17 @@ sub extract_slides_dom($self, $html, %opts) {
 				$node->find('ul')->map(sub{ $_->{class}= $_->{class}? "$_->{class} auto-step" : 'auto-step' });
 			}
 			$cur_slide->append_content($node);
+		}
+	}
+	
+	# Re-add things that belong in <head>
+	($dom->at('html') || $dom)->prepend_content('<head></head>')
+		unless $dom->at('head');
+	for my $el (@move_to_head) {
+		if ($el->tag eq 'head') {
+			$el->child_nodes->each(sub{ $dom->at('head')->append_content($_) });
+		} else {
+			$dom->at('head')->append_content($el);
 		}
 	}
 	return ($dom, @slides);
