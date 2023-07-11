@@ -317,7 +317,7 @@ page, and one Mojo::DOM object for each detected slide, as a list.
 =cut
 
 sub _node_is_slide($self, $node, $tag) {
-	return $tag eq 'div' && $node->{class} =~ /\bslide\b/;
+	return $tag eq 'div' && ($node->{class}//'') =~ /\bslide\b/;
 }
 sub _node_starts_slide($self, $node, $tag) {
 	return $tag eq 'h1' || $tag eq 'h2' || $tag eq 'h3';
@@ -337,7 +337,7 @@ sub extract_slides_dom($self, $html, %opts) {
 			# The markdown processor puts <p> tags on any raw html it wasn't expecting,
 			my $parent= $el->parent;
 			$el->remove;
-			$parent->remove if $parent->tag eq 'p' && $parent =~ m|^<p>\s*</p>|;
+			$parent->remove if $parent && $parent->tag && $parent->tag eq 'p' && $parent =~ m|^<p>\s*</p>|;
 		}
 	}
 	for my $el ($slide_root->find('notes')->each) {
@@ -475,7 +475,7 @@ sub startup($self) {
 	$self->routes->websocket('/slidelink.io' => sub($c){ $c->app->init_slidelink($c) });
 }
 
-sub serve_page($self, $c) {
+sub serve_page($self, $c, %opts) {
 	if (!defined $self->page_dom || $self->cache_token) {
 		eval { $self->build_slides; 1 }
 			or $self->log->error($@);
@@ -487,7 +487,14 @@ sub serve_page($self, $c) {
 	my @slides= $self->slides_dom->@[0..$slide_max];
 	my $combined= Mojo::DOM->new($self->page_dom);
 	$combined->at('div.slides')->append_content(join '', @slides);
-	
+
+	# If this is for the presenter, set the config variable for that
+	if ($opts{presenter} || defined $c->req->param('presenter')) {
+		$combined->at('head')->append_content(
+			'<script>window.slides.config.mode="presenter";</script>'."\n"
+		);
+	}
+
 	$c->render(text => ''.$combined);
 }
 
@@ -525,6 +532,9 @@ sub init_slidelink($self, $c) {
 			$roles{lead}= 1;
 			$roles{navigate}= 1;
 			$self->update_published_state(viewer_count => scalar keys $self->viewers->%*);
+		}
+		elsif (defined $key) {
+			$c->send({ json => { key_incorrect => 1 } });
 		}
 	}
 	$c->stash('roles', join ',', keys %roles);

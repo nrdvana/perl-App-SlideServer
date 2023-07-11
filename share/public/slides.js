@@ -137,34 +137,47 @@ window.slides= {
 			config= self.config
 		if (!config.websocket_url)
 			config.websocket_url= 'slidelink.io'
-		if (!config.mode) {
-			var match= window.location.hash.match('presenter(=[0-9]*)?');
-			config.mode= match? 'presenter' : 'obs';
-			if (match && match[1]) config.key= match[1].substr(1);
-			console.log(config, match, window.location.hash);
-		}
-		if (!('code_highlight' in config) && window.hljs)
+		if (!config.mode)
+			config.mode= 'obs';
+		if (config.code_highlight === undefined && window.hljs)
 			config.code_highlight= function(el){ window.hljs.highlightElement(el) }
+		if (config.mode == 'presenter' && (config.key == null || config.key.length == 0))
+			config.key= null;//TODO: getCookieVal('access_key');
 		self.config= config
 		// Generic button and checkbox handlers
 		this._button_dispatch= function(ev) {
 			try {
 				self[this.dataset.method].call(self, ev);
 			} catch (e) {
-				console.log('Calling slides.'+this.dataset.method+': '+e);
+				console.log('Calling slides.'+this.dataset.method+': ', e);
 			}
+		};
+		this._enter_dispatch= function(ev) {
+			if (ev.keyCode == 13) // Enter
+				try {
+					self[this.dataset.enter_method].call(self, ev);
+				} catch (e) {
+					console.log('Calling slides.'+this.dataset.enter_method+': ', e);
+				}
 		};
 		this._ckbox_dispatch= function(ev) {
 			try {
 				self[this.dataset.method].call(self, this.checked, ev);
 			} catch(e) {
-				console.log('Calling slides.'+this.dataset.method+' : '+e);
+				console.log('Calling slides.'+this.dataset.method+' : ', e);
 			}
 		};
 		self._fixup_page()
 		self._build_ui()
 		this._show_slide(1,1);
-		self.reconnect()
+		// The presenter needs a chance to enter the key before connecting
+		if (config.mode == 'presenter' && config.key == null) {
+			self.togglemenu();
+			self.root.find('.status-actions .login').show();
+			self.root.find('.status-actions .reconnect-btn').show();
+		} else {
+			self.reconnect()
+		}
 	},
 	// Perform alterations to the HTML structure of the page to allow
 	// less-strict hand-edited content to be automatically upgraded.
@@ -225,6 +238,7 @@ window.slides= {
 		self.root.prepend(this._public_ui_html);
 		self.root.find('button').each(function(){ this.onclick= self._button_dispatch });
 		self.root.find('input[type="checkbox"]').each(function(){ this.oninput= self._ckbox_dispatch });
+		self.root.find('.status-actions input[name="key"]').each(function(){ this.onkeydown= self._enter_dispatch });
 		self.root.find('.status-actions button').hide();
 		$(document).on('keydown', function(e) { return self._handle_key(e.originalEvent); });
 		self.root.find('.slide').on('click', function(e) { return self._handle_click(e) });
@@ -241,6 +255,7 @@ window.slides= {
 		'    <h5>Status</h5>'+
 		'    <ul class="status"></ul>'+
 		'    <div class="status-actions">'+
+		'      <label class="login">Key : <input type="password" name="key" data-enter_method="reconnect"></label>'+
 		'      <button class="reconnect-btn" type="button" data-method="reconnect">Reconnect</button>'+
 		'      <label class="cb follow"><input type="checkbox" name="follow" checked data-method="enableFollow"> Follow</label>'+
 		'      <label class="cb lead"><input type="checkbox" name="lead" data-method="enableLead"> Lead</label>'+
@@ -321,13 +336,17 @@ window.slides= {
 				url= loc.pathname + (loc.pathname.endsWith('/')? '' : '/') + url;
 			url= (loc.protocol == 'https:'? 'wss://' : 'ws://') + window.location.host + url;
 		}
-		var key= this.config.key;
 		var mode= this.config.mode;
-		if (mode != 'obs' && !key)
-			this.config.key= key= window.prompt('Key');
+		url += '?mode='+mode;
+		if (mode == 'presenter') {
+			if (this.config.key == null)
+				this.config.key= this.root.find('input[name="key"]').val();
+			url += '&key='+encodeURIComponent(this.config.key);
+			this.root.find('.status-actions > .login').hide();
+		}
 		// Connect WebSocket to local event server
 		this._set_conn_note('<p>Connecting...</p>')
-		this.ws= new WebSocket(url+'?mode='+mode+'&key='+encodeURIComponent(key));
+		this.ws= new WebSocket(url);
 		this.ws.onmessage= function(event) { self._handle_ws_event(JSON.parse(event.data)) }
 		this.ws.onopen= function(event) { self._handle_connect(event, url, mode) }
 		this.ws.onclose= function(event) { self._handle_disconnect(event) }
@@ -448,6 +467,14 @@ window.slides= {
 			if (this.roles.navigate || this.roles.lead) {
 				this.root.find('.status-actions .navigate').show();
 			}
+		}
+		if (event.key_incorrect) {
+			// TODO: create a password entry form on the sidebar and a login sequence
+			// that happens over the websocket.
+			this._set_conn_note('<p>Incorrect Key</p>');
+			this.config.key= null;
+			this.root.find('.status-actions > .login').show();
+			this.root.find('.reconnect-btn').show()
 		}
 		if (event.page_changed) {
 			window.location.reload();
