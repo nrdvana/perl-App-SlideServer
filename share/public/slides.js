@@ -167,7 +167,9 @@ window.slides= {
 				console.log('Calling slides.'+this.dataset.method+' : ', e);
 			}
 		};
-		self._fixup_page()
+		this.slides= this.buildSlidesArray();
+		this.resizeSlides();
+		window.addEventListener('resize', function(event) { self.resizeSlides() }, true);
 		self._build_ui()
 		this._show_slide(1,1);
 		// The presenter needs a chance to enter the key before connecting
@@ -181,26 +183,62 @@ window.slides= {
 	},
 	// Perform alterations to the HTML structure of the page to allow
 	// less-strict hand-edited content to be automatically upgraded.
-	_fixup_page: function() {
+	buildSlidesArray: function(root_el) {
 		var self= this;
-		if (!self.root) {
-			if (self.config.root) self.root= self.config.root;
-			else if ($('div.slides').length) self.root= $($('div.slides')[0]);
-			else {
-				// TODO: upgrade body to div.slides
-				throw "Can't find div.slides element in document";
+		if (!root_el) {
+			if (!self.root) {
+				if (self.config.root) self.root= self.config.root;
+				else if ($('div.slides').length) self.root= $($('div.slides')[0]);
+				else {
+					// TODO: upgrade body to div.slides
+					throw "Can't find div.slides element in document";
+				}
 			}
+			root_el= self.root;
 		}
-		self.root.find('code').each(function() { self._fixup_code_block(this) })
 		// Wrap each slide with a Slide object, which initializes its steps
-		this.slides= [];
-		var slides_jq= self.root.find('.slide');
-		for (var i=0; i < slides_jq.length; i++) {
-			var slide= new Slide(slides_jq[i], i+1)
-			this.slides.push(slide)
+		var slides= [];
+		var slides_jq= root_el.find('.slide');
+		for (var i=0; i < slides_jq.length; i++)
+			slides.push(self.wrapSlideEl(slides_jq[i], i+1))
+		return slides;
+	},
+	wrapSlideEl: function(slide_el, num) {
+		var self= this;
+		$(slide_el).find('code').each(function() { self._fixup_code_block(this) })
+		return new Slide(slide_el, num);
+	},
+	replaceSlide: function(num, new_slide_el) {
+		var self= this;
+		// insert it into the page, invisible, so that it sizes properly.
+		new_slide_el.style.visibility= 'hidden';
+		self.root.append(new_slide_el);
+		var slide= self.wrapSlideEl(new_slide_el, num);
+		console.log('created slide and appended', slide);
+		var viewport_w= $(window).width();
+		var viewport_h= $(window).height();
+		slide.showStep(slide.max_step)
+		slide.scaleTo(viewport_w, viewport_h);
+		
+		if (num <= self.slides.length) {
+			var old_slide= self.slides[num-1];
+			self.slides[num-1]= slide;
+			$(old_slide.el).replaceWith(new_slide_el);
+			if (self.cur_slide == num)
+				self._show_slide(num, old_slide.cur_step);
+			else
+				self.slides[num-1].hide();
+		} else {
+			// Should never happen, but will prevent even more bizarre errors...
+			while (this.slides.length -1 < num) {
+				var placeholder= self.wrapSlideEl($('<div class="slide">Slide Missing?</div>')[0], this.slides.length+1);
+				self.root.append(placeholder.el)
+				self.slides.push(placeholder);
+			}
+			self.root.append(new_slide_el);
+			self.slides.push(slide);
 		}
-		this.resizeSlides();
-		window.addEventListener('resize', function(event) { self.resizeSlides() }, true);
+		new_slide_el.style.visibility= '';
 	},
 	resizeSlides: function() {
 		var viewport_w= $(window).width();
@@ -480,8 +518,9 @@ window.slides= {
 			window.location.reload();
 		}
 		if (event.slides_changed) {
-			// TODO: graceful slide load
-			window.location.reload();
+			console.log('slides_changed', event.slides_changed);
+			for (var i=0; i < event.slides_changed.length; i++)
+				this.replaceSlide(event.slides_changed[i].idx+1, $(event.slides_changed[i].html)[0]);
 		}
 	},
 	send_ws_message: function(obj) {

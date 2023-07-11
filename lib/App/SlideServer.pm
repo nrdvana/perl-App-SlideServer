@@ -471,7 +471,6 @@ sub startup($self) {
 	$self->presenter_key;
 	$self->static->paths([ $self->serve_dir->child('public'), $self->share_dir->child('public') ]);
 	$self->routes->get('/' => sub($c){ $c->app->serve_page($c) });
-	$self->routes->get('/slides' => sub($c){ $c->app->serve_slides($c) });
 	$self->routes->websocket('/slidelink.io' => sub($c){ $c->app->init_slidelink($c) });
 }
 
@@ -496,29 +495,6 @@ sub serve_page($self, $c, %opts) {
 	}
 
 	$c->render(text => ''.$combined);
-}
-
-sub serve_slides($self, $c) {
-	my $slides= $self->slides_dom;
-	my $max_slide= ($c->stash('roles') =~ /\blead\b/)? $#$slides
-		: $self->published_state->{slide_max} // 0;
-	my $result= '';
-	my $i= $c->req->every_param('i');
-	if ($i && @$i) {
-		for (@$i) {
-			unless (looks_like_number($_) && $_ >= 0 && $_ <= $max_slide) {
-				$c->code(422);
-				$c->message('Invalid slide number');
-				return;
-			}
-			$result .= $slides->[$_];
-		}
-	} else {
-		for (0 .. $max_slide) {
-			$result .= $slides->[$_];
-		}
-	}
-	$c->render(text => $result);
 }
 
 sub init_slidelink($self, $c) {
@@ -590,8 +566,10 @@ sub on_page_changed($self) {
 }
 
 sub on_slides_changed($self, $changed) {
-	$_->send({ json => { slides_changed => $changed } })
-		for values $self->viewers->%*;
+	my @changes= map +{ idx => $_, html => $self->slides_dom->[$_] }, @$changed;
+	for my $viewer (values $self->viewers->%*) {
+		$viewer->send({ json => { slides_changed => \@changes } })
+	}
 }
 
 =head1 EXPORTS
