@@ -9,10 +9,10 @@ div.slide { min-width: 900px; }
 
 <div style="text-align:left; margin: 2em;">
   Follow Along at:<br>
-  <a href="https://nrdvana.net/presentations/app-slideserver">nrdvana.net/presentations/app-slideserver</a><br>
+  <a href="https://nrdvana.net/slides/app-slideserver">nrdvana.net/slides/app-slideserver</a><br>
   <br>
   Source:<br>
-  <a href="https://github.com/nrdvana/perl-App-SlideServer">github.com/nrdvana/perl-App-SlideServer</a><br>
+  <a href="https://github.com/nrdvana/perl-App-SlideServer" target="_blank">github.com/nrdvana/perl-App-SlideServer</a><br>
 </div>
 
 <center>
@@ -99,21 +99,38 @@ CPAN: NERDVANA
   </code></pre>
 </div>
 
-## A complete Example
+## A Complete Example
 
-<iframe style="width: 700px; height: 600px;"
-  src="/slides.md">
+<iframe style="width: 700px; height: 600px; background-color: white;"
+  src="slides.txt">
 </iframe>
 
 ## Deploying to a Server
 
-```
-$ docker build -t slideserver -f share/Dockerfile .
+<pre><code data-step="1-1">
+ # Build the Image
+ $ docker build -t slideserver -f share/Dockerfile .
+</code></pre>
 
-$ docker create --name myslides -v $PWD:$PWD -w $PWD -p 80 .
+<pre><code data-step="2-2">
+ # Build the Image
+ $ docker build -t slideserver -f share/Dockerfile .
+ 
+ # Create a Container
+ $ docker create --name myslides -v $PWD:$PWD -w $PWD -p 80 .
+</code></pre>
 
-$ docker start myslides && docker logs --follow myslides
-```
+<pre><code data-step="3">
+ # Build the Image
+ $ docker build -t slideserver -f share/Dockerfile .
+ 
+ # Create a Container
+ $ docker create --name myslides -v $PWD:$PWD -w $PWD -p 80 .
+ 
+ # Run it
+ $ docker start myslides;
+ $ docker logs --follow myslides
+</code></pre>
 
 <pre class=notes>
   makes docker image 'slideserver'
@@ -124,7 +141,49 @@ $ docker start myslides && docker logs --follow myslides
 
 ## Deploying under Traefik
 
+<pre><code data-step=1-1>
+ $ docker create --name=slideserver --restart=always \
+    app-slideserver:latest
+</code></pre>
 
+<pre><code data-step=2-2>
+ $ docker create --name=slideserver --restart=always \
+    --restart=always \
+    -e APP_SLIDESERVER_PRESENTER_KEY=REDACTED \
+    -w /app \
+    -v $PWD/slides.md:/app/slides.md \
+    -v $PWD/public:/app/public \
+    app-slideserver:latest
+</code></pre>
+
+<hr>
+
+```
+$ docker create --name=slideserver --restart=always\
+  --hostname=nrdvana.net --net=traefik-net --ip=172.18.0.36 \
+  -e APP_SLIDESERVER_PRESENTER_KEY=REDACTED \
+  -w /app -v $PWD/slides.md:/app/slides.md -v $PWD/public:/app/public \
+  --label 'traefik.enable=true' \
+  --label 'traefik.http.middlewares.slideserver1.redirectScheme.scheme=https' \
+  --label 'traefik.http.middlewares.slideserver2.redirectRegex.regex=(.*)/slides/app-slideserver$' \
+  --label 'traefik.http.middlewares.slideserver2.redirectRegex.replacement=${1}/slides/app-slideserver/' \
+  --label 'traefik.http.middlewares.slideserver3.stripprefix.prefixes=/slides/app-slideserver' \
+  --label 'traefik.http.routers.slideserver.entryPoints=https' \
+  --label 'traefik.http.routers.slideserver.rule=(Host(`nrdvana.net`,`www.nrdvana.net`) && PathPrefix(`/slides/app-slideserver`))' \
+  --label 'traefik.http.routers.slideserver.middlewares=slideserver1@docker,slideserver2@docker,slideserver3@docker' \
+  --label 'traefik.http.routers.slideserver.priority=15' \
+  --label 'traefik.http.routers.slideserver.tls=true' \
+  --label 'traefik.http.routers.slideserver.tls.certresolver=le' \
+  --label 'traefik.http.routers.slideserver.tls.domains[0].main=nrdvana.net' \
+  --label 'traefik.http.routers.slideserver.tls.domains[0].sans=www.nrdvana.net' \
+  --label 'traefik.http.routers.slideserver_http.entryPoints=http' \
+  --label 'traefik.http.routers.slideserver_http.rule=(Host(`nrdvana.net`,`www.nrdvana.net`) && PathPrefix(`/slides/app-slideserver`))' \
+  --label 'traefik.http.routers.slideserver_http.middlewares=slideserver1@docker,slideserver2@docker,slideserver3@docker' \
+  --label 'traefik.http.routers.slideserver_http.priority=15' \
+  --label 'traefik.http.services.slideserver.loadbalancer.server.port=80' \
+  --label 'traefik.http.services.slideserver.loadbalancer.server.scheme=http' \
+  app-slideserver:latest
+```
 
 ## Future Work
 
