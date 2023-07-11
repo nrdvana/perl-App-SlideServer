@@ -4,8 +4,7 @@ RUN apk add --no-cache perl gcc make musl-dev
 
 RUN apk add --no-cache perl-app-cpanminus perl-mojolicious perl-log-any perl-dev perl-module-build perl-file-pushd
 
-COPY App-SlideServer-0.001.tar.gz /
-RUN cpanm /App-SlideServer-0.001.tar.gz
+RUN cpanm App::SlideServer
 
 EXPOSE 80
 
