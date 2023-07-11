@@ -1,6 +1,9 @@
 /* baseline defaults for a slide-like environment */
 html { margin: 0; padding: 0; }
-body { margin: 0 0 -4em 0; padding: 0; }
+body {
+	margin: 0 0 -4em 0; padding: 0;
+	background-color: #333; color: #EEE;
+}
 table { border-collapse: collapse; }
 ul, ol { list-style: outside; padding: 0px 0px 0px 1em; text-align:left; }
 h1 { font-size: 150%; }
@@ -29,9 +32,13 @@ h3 { font-size: 110%; margin: .5em; }
 	text-align: center;
 }
 .slide .notes { display: none; }
+.slide ul ul { padding-top: .4em; }
+li { margin-bottom: .2em; }
+a { text-decoration: none; color: #DEF; }
+.slide pre { text-align: left; }
+.slide code { white-space: pre; font-size: 40%; margin:4px; text-align: left; }
 
-/* styles for this presentation */
-body { background-color: #333; color: #DDD; }
+/* styles for this presentation *
 body.high-contrast { background-color: #000; color: #FFF; }
 th { vertical-align: baseline; text-align: left; }
 td { vertical-align: baseline; text-align: left; }
@@ -44,7 +51,6 @@ table.data {
 table.data th { padding: 4px 8px; background-color: #222; }
 .high-contrast table.data th { background-color: #151515; }
 .high-contrast table.data td { background-color: #303030; }
-li { margin-bottom: .2em; }
 
 .chat-app { font-size: 14px; }
 .chatlog {
@@ -61,12 +67,9 @@ li { margin-bottom: .2em; }
 .chatline { width: 640px; }
 .chatline input { display: inline-block; background-color: #EEE; color: black; width: 80%; }
 .chatline button { display: inline-block; width: 15%; }
-.slide pre { text-align: left; }
-.slide code { white-space: pre; font-size: 40%; margin:4px; text-align: left; }
 
 h1.loud { font-size: 200%; }
 h1.lesson { display:inline-block; white-space: nowrap; text-align:center; font-size: 150%; }
-a { text-decoration: none; color: #DEF; }
 figure.lesson { width: 90%; }
 figure img { height: 10em; }
 .slide figure.extern { min-height: 8em; }
@@ -77,4 +80,4 @@ figure pre { margin:0px; }
 .slide figure.code.wider code { font-size: 35%; }
  .slide ul.bare li { list-style-type: none; }
 .slide ul li.bare { list-style-type: none; }
-.slide ul ul { padding-top: .4em; }
+*/
