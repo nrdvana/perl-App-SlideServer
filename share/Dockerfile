@@ -4,7 +4,7 @@ RUN apk add --no-cache perl gcc make musl-dev
 
 RUN apk add --no-cache perl-app-cpanminus perl-mojolicious perl-log-any perl-dev perl-module-build perl-file-pushd
 
-RUN cpanm App::SlideServer
+RUN cpanm Linux::Inotify2 App::SlideServer
 
 EXPOSE 80
 
