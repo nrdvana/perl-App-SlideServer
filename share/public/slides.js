@@ -23,6 +23,7 @@
  * element is hidden or when the server says it ends.
  */
 function Slide(el, num) {
+	var self= this;
 	this.el= el;
 	this.el.dataset.slide= num;
 	this.num= num;
@@ -47,26 +48,32 @@ function Slide(el, num) {
 	var max_step= 0;
 	this.steps= slide_jq.find('.slide-step');
 	this.steps.each(function() {
-		if (this.dataset.step && !this.dataset.stepRanges) {
-			var show_list= this.dataset.step;
-			show_list= (""+show_list).split(',');
+		if (this.dataset.step) {
+			var show_list= self.parseSteps(this.dataset.step);
 			for (var i= 0; i < show_list.length; i++) {
-				show_list[i]= show_list[i].split(/-/);
-				show_list[i][0]= parseInt(show_list[i][0]);
-				if (show_list[i][0] > max_step) max_step= show_list[i][0];
+				if (show_list[i][0] > max_step)
+					max_step= show_list[i][0];
 				// If a step  has both a start frame and an end frame, then it is "temporary".
 				if (show_list[i].length > 1) {
-					show_list[i][1]= parseInt(show_list[i][1]);
-					if (show_list[i][1] > max_step) max_step= show_list[i][1];
 					$(this).addClass('temporary-step');
+					if (show_list[i][1] > max_step) max_step= show_list[i][1];
 				}
 			}
-			this.dataset.stepRanges= show_list;
 		}
 	});
 	this.notes= slide_jq.find('.notes').text();
 	this.max_step= max_step;
 	this.cur_step= 0;
+}
+Slide.prototype.parseSteps= function(spec) {
+	var show_list= (""+spec).split(',');
+	for (var i= 0; i < show_list.length; i++) {
+		show_list[i]= show_list[i].split(/-/);
+		show_list[i][0]= parseInt(show_list[i][0]);
+		if (show_list[i].length > 1)
+			show_list[i][1]= parseInt(show_list[i][1]);
+	}
+	return show_list;
 }
 Slide.prototype.scaleTo= function(viewport_w, viewport_h) {
 	var el_w= $(this.el).innerWidth();
@@ -92,6 +99,7 @@ function _num_is_in_ranges(num, ranges) {
 	return false;
 }
 Slide.prototype.showStep= function(step_num, view_mode) {
+	var self= this;
 	if (step_num < 0) step_num= this.max_step + 1 + step_num;
 	if (step_num < 0) step_num= 0;
 	this.steps.each(function() {
@@ -101,7 +109,7 @@ Slide.prototype.showStep= function(step_num, view_mode) {
 		// in the document flow so that the layout of the rest doesn't jump around.
 		// But temporary have to be removed from the layout so that they don't occupy
 		// space.  Meanwhile the presenter gets to see all hidden elements.
-		if (_num_is_in_ranges(step_num, this.dataset.stepRanges))
+		if (_num_is_in_ranges(step_num, self.parseSteps(this.dataset.step)))
 			step.css('visibility','visible').css('position','relative').css('opacity',1);
 		else {
 			if (view_mode == 'presenter')
