@@ -219,7 +219,7 @@ and returns the content as a string I<of characters>, not bytes.
 
 In list context, this returns both the content and a token value that can be
 used to test if the content changed (usually file mtime) on the next call
-using the 'if_changed' option.  If you pass the 'if_chagned' value and the
+using the 'if_changed' option.  If you pass the 'if_changed' value and the
 content has I<not> changed, this returns undef.
 
 =cut
