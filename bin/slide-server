@@ -33,7 +33,8 @@ my $app= App::SlideServer->new(\%opts);
 eval {
 	$app->monitor_source_changes(1);
 	$log->info("Monitoring ".$app->slides_source_file." for changes");
-}
-or $log->warn("Can't monitor for changes, install Linux::Inotify2: $@");
+} or do {
+	Mojo::IOLoop->recurring(1 => sub { $app->build_slides; });
+};
 push @ARGV, qw( daemon -l http://*:2000 ) unless @ARGV;
 $app->start(@ARGV);
