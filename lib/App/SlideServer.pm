@@ -489,8 +489,9 @@ sub serve_page($self, $c, %opts) {
 
 	# If this is for the presenter, set the config variable for that
 	if ($opts{presenter} || defined $c->req->param('presenter')) {
+		my $key = $c->req->param('presenter');
 		$combined->at('head')->append_content(
-			'<script>window.slides.config.mode="presenter";</script>'."\n"
+			"<script>\n  window.slides.config.mode='presenter';\n  window.slides.config.key='$key';\n</script>\n"
 		);
 	}
 
