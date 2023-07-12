@@ -280,7 +280,7 @@ window.slides= {
 	// Remove leading whitespace, and convert tabs to spaces, and remove
 	// the largest common indent of all lines.
 	_fixup_code_block: function(code_el) {
-		var text= $(code_el).text();
+		var text= code_el.innerHTML;
 		text= text.replace(/\t/g, '   '); // tabs to spaces
 		text= text.replace(/^\s*\n/g, ''); // remove leading blank line
 		text= text.replace(/\n\s*$/g, ''); // remove blank trailing line
@@ -294,7 +294,7 @@ window.slides= {
 			}
 		if (indent > 0)
 			text= text.replace(new RegExp('^'+(' '.repeat(indent)), 'mg'), '');
-		$(code_el).text(text);
+		code_el.innerHTML = text;
 		// Apply syntax highlighting if available
 		if (this.config.code_highlight)
 			this.config.code_highlight(code_el);
