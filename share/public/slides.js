@@ -35,7 +35,12 @@ function Slide(el, num) {
 		var start_step= e.dataset.step;
 		if (start_step && start_step.match(/^[0-9]+$/))
 			step_num= parseInt(start_step);
-		$(e).children().each(function(){ this.dataset.step= [[step_num++]] });
+		$(e).children().each(function(){
+			if (this.dataset.step && this.dataset.step.match(/^[0-9]+$/))
+				step_num= parseInt(this.dataset.step) + 1;
+			else
+				this.dataset.step= step_num++;
+		});
 	});
 	// do a deep search to find any element with 'data-step' and give it the class of
 	// 'slide-step' for easier selecting later.
