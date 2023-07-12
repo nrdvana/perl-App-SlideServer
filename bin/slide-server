@@ -8,7 +8,7 @@ use Log::Any::Adapter 'Daemontools',
 	-init => { argv => 1, env => 1, signals => ['USR1','USR2'] };
 BEGIN {
 	# Allow running from project dir
-	push @INC, "$FindBin::RealBin/../lib"
+	unshift @INC, "$FindBin::RealBin/../lib"
 		if -f "$FindBin::RealBin/../lib/App/SlideServer.pm";
 }
 use App::SlideServer 'mojo2logany';
